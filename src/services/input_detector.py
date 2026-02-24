@@ -51,6 +51,7 @@ class KBDLLHOOKSTRUCT(ctypes.Structure):
 class _NumpadSignal(QObject):
     """Bridge to emit numpad presses from the hook thread to the Qt main thread."""
     pressed = pyqtSignal(int, int)
+    back_pressed = pyqtSignal()
     numlock_changed = pyqtSignal(bool)  # True = Num Lock ON, False = OFF
 
 
@@ -76,8 +77,13 @@ class InputDetector:
         self._hook = None
         self._thread: threading.Thread | None = None
         self._running = False
+        self._passthrough = False
         self._proc = HOOKPROC(self._hook_proc)
         self.numpad_signal = _NumpadSignal()
+
+    def set_passthrough(self, value: bool) -> None:
+        """When True, numpad keys pass through to the active window (for dialogs)."""
+        self._passthrough = value
 
     @property
     def last_was_injected(self) -> bool:
@@ -103,6 +109,16 @@ class InputDetector:
                 user32.PostThreadMessageW(thread_id, 0x0012, 0, 0)
             self._thread.join(timeout=2)
 
+    def _is_numpad_zero(self, kb: KBDLLHOOKSTRUCT) -> bool:
+        """Check if key is numpad 0 (VK_INSERT when Num Lock OFF, non-extended)."""
+        if kb.flags & LLKHF_INJECTED:
+            return False
+        if kb.flags & LLKHF_EXTENDED:
+            return False
+        if user32.GetKeyState(VK_NUMLOCK) & 1:
+            return False
+        return kb.vkCode == 0x2D  # VK_INSERT
+
     def _is_numpad_nav_key(self, kb: KBDLLHOOKSTRUCT) -> tuple[int, int] | None:
         """Check if key is a numpad navigation key (Num Lock OFF, non-extended, non-injected)."""
         if kb.flags & LLKHF_INJECTED:
@@ -126,15 +142,24 @@ class InputDetector:
                     will_be_on = not bool(user32.GetKeyState(VK_NUMLOCK) & 1)
                     self.numpad_signal.numlock_changed.emit(will_be_on)
 
-                pos = self._is_numpad_nav_key(kb)
-                if pos is not None:
-                    self.numpad_signal.pressed.emit(pos[0], pos[1])
-                    return 1  # suppress
+                if not self._passthrough:
+                    pos = self._is_numpad_nav_key(kb)
+                    if pos is not None:
+                        self.numpad_signal.pressed.emit(pos[0], pos[1])
+                        return 1  # suppress
+
+                    # Numpad 0 (VK_INSERT when Num Lock OFF, non-extended)
+                    if self._is_numpad_zero(kb):
+                        self.numpad_signal.back_pressed.emit()
+                        return 1
 
             elif wParam in (WM_KEYUP, WM_SYSKEYUP):
-                # Suppress matching key-up to avoid orphan events
-                if self._is_numpad_nav_key(kb) is not None:
-                    return 1
+                if not self._passthrough:
+                    # Suppress matching key-up to avoid orphan events
+                    if self._is_numpad_nav_key(kb) is not None:
+                        return 1
+                    if self._is_numpad_zero(kb):
+                        return 1
 
         return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
 

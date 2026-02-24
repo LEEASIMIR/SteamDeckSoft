@@ -4,9 +4,9 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QIcon, QMouseEvent
-from PyQt6.QtWidgets import QPushButton, QMenu
+from PyQt6.QtCore import Qt, QSize, QRect
+from PyQt6.QtGui import QIcon, QMouseEvent, QPainter, QPixmap, QColor
+from PyQt6.QtWidgets import QPushButton, QMenu, QStyleOptionButton, QStyle
 
 from ..config.models import ButtonConfig
 from .styles import DECK_BUTTON_STYLE, DECK_BUTTON_EMPTY_STYLE, MONITOR_BUTTON_STYLE
@@ -45,6 +45,7 @@ class DeckButton(QPushButton):
         self._action_registry = action_registry
         self._main_window = main_window
         self._monitor_text: str | None = None
+        self._icon_pixmap: QPixmap | None = None
 
         self.setObjectName("deckButton")
         self.setFixedSize(size, size)
@@ -64,12 +65,20 @@ class DeckButton(QPushButton):
             return
 
         if self._config.action.type == "system_monitor":
-            self.setStyleSheet(MONITOR_BUTTON_STYLE)
-            return
+            style = MONITOR_BUTTON_STYLE
+        else:
+            color_index = (self._row * 5 + self._col) % len(_BUTTON_COLORS)
+            colors = _BUTTON_COLORS[color_index]
+            style = DECK_BUTTON_STYLE.format(**colors)
 
-        color_index = (self._row * 5 + self._col) % len(_BUTTON_COLORS)
-        colors = _BUTTON_COLORS[color_index]
-        self.setStyleSheet(DECK_BUTTON_STYLE.format(**colors))
+        overrides: list[str] = []
+        if self._config.label_color:
+            overrides.append(f"color: {self._config.label_color};")
+        if self._config.label_size:
+            overrides.append(f"font-size: {self._config.label_size}px;")
+        if overrides:
+            style += "\nQPushButton#deckButton { " + " ".join(overrides) + " }"
+        self.setStyleSheet(style)
 
     def _update_display(self) -> None:
         if self._config is None:
@@ -89,10 +98,54 @@ class DeckButton(QPushButton):
         else:
             self.setText(self._config.label)
 
-        # Set icon if available
+        # Load icon pixmap for custom painting (drawn behind text)
         if self._config.icon and os.path.isfile(self._config.icon):
-            self.setIcon(QIcon(self._config.icon))
-            self.setIconSize(QSize(40, 40))
+            self._icon_pixmap = QPixmap(self._config.icon)
+        else:
+            self._icon_pixmap = None
+
+    def paintEvent(self, event) -> None:
+        if not (self._icon_pixmap and not self._icon_pixmap.isNull()):
+            super().paintEvent(event)
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        # 1) Draw button background (no text/icon)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.text = ""
+        opt.icon = QIcon()
+        self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
+
+        # 2) Draw icon
+        padding = 10
+        available = min(self.width(), self.height()) - padding * 2
+        scaled = self._icon_pixmap.scaled(
+            available, available,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        x = (self.width() - scaled.width()) // 2
+        y = (self.height() - scaled.height()) // 2
+        painter.drawPixmap(x, y, scaled)
+
+        # 3) Draw label text on top
+        text = self.text()
+        if text:
+            label_color = (
+                self._config.label_color
+                if self._config and self._config.label_color
+                else "#ffffff"
+            )
+            painter.setPen(QColor(label_color))
+            font = self.font()
+            font.setPixelSize(self._config.label_size if self._config and self._config.label_size else 15)
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+
+        painter.end()
 
     def _on_clicked(self) -> None:
         if self._config and self._config.action.type:
@@ -134,7 +187,10 @@ class DeckButton(QPushButton):
             self._config, self._row, self._col,
             self._main_window._config_manager, self._main_window
         )
-        if dialog.exec():
+        self._main_window.set_numpad_passthrough(True)
+        result = dialog.exec()
+        self._main_window.set_numpad_passthrough(False)
+        if result:
             new_config = dialog.get_config()
             folder = self._main_window._config_manager.get_folder_by_id(
                 self._main_window.get_current_folder_id()

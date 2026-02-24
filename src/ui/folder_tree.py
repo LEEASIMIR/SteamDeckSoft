@@ -21,6 +21,7 @@ class FolderTreeWidget(QTreeWidget):
     def __init__(self, config_manager: ConfigManager, parent=None) -> None:
         super().__init__(parent)
         self._config_manager = config_manager
+        self._main_window = parent
 
         self.setObjectName("folderTree")
         self.setStyleSheet(FOLDER_TREE_STYLE)
@@ -148,8 +149,14 @@ class FolderTreeWidget(QTreeWidget):
         elif action == delete_action:
             self._delete_folder(folder_id)
 
+    def _set_passthrough(self, value: bool) -> None:
+        if self._main_window is not None and hasattr(self._main_window, "set_numpad_passthrough"):
+            self._main_window.set_numpad_passthrough(value)
+
     def _add_subfolder(self, parent_id: str) -> None:
+        self._set_passthrough(True)
         name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
+        self._set_passthrough(False)
         if ok and name.strip():
             new_folder = self._config_manager.add_folder(parent_id, name.strip())
             if new_folder:
@@ -161,7 +168,9 @@ class FolderTreeWidget(QTreeWidget):
         folder = self._config_manager.get_folder_by_id(folder_id)
         if folder is None:
             return
+        self._set_passthrough(True)
         name, ok = QInputDialog.getText(self, "Rename Folder", "New name:", text=folder.name)
+        self._set_passthrough(False)
         if ok and name.strip():
             self._config_manager.rename_folder(folder_id, name.strip())
             self.rebuild()
@@ -173,7 +182,10 @@ class FolderTreeWidget(QTreeWidget):
             return
         from .folder_editor_dialog import FolderEditorDialog
         dialog = FolderEditorDialog(folder, self)
-        if dialog.exec():
+        self._set_passthrough(True)
+        result = dialog.exec()
+        self._set_passthrough(False)
+        if result:
             updated = dialog.get_config()
             folder.name = updated.name
             folder.mapped_apps = updated.mapped_apps

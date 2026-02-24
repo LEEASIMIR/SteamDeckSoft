@@ -19,105 +19,301 @@
     "buttons": [
       {
         "position": [0, 0],
-        "label": "7",
+        "label": "VOL -",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "7"
+            "command": "volume_down"
           }
         }
       },
       {
         "position": [0, 1],
-        "label": "8",
+        "label": "MUTE",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "8"
+            "command": "mute"
           }
         }
       },
       {
         "position": [0, 2],
-        "label": "9",
+        "label": "VOL +",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "9"
+            "command": "volume_up"
           }
         }
       },
       {
         "position": [1, 0],
-        "label": "4",
+        "label": "PREV",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "4"
+            "command": "prev_track"
           }
         }
       },
       {
         "position": [1, 1],
-        "label": "5",
+        "label": "PLAY",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "5"
+            "command": "play_pause"
           }
         }
       },
       {
         "position": [1, 2],
-        "label": "6",
+        "label": "NEXT",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "media_control",
           "params": {
-            "keys": "6"
+            "command": "next_track"
           }
         }
       },
       {
         "position": [2, 0],
-        "label": "1",
+        "label": "CPU",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "system_monitor",
           "params": {
-            "keys": "1"
+            "monitor_type": "cpu"
           }
         }
       },
       {
         "position": [2, 1],
-        "label": "2",
+        "label": "RAM",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "system_monitor",
           "params": {
-            "keys": "2"
+            "monitor_type": "memory"
           }
         }
       },
       {
         "position": [2, 2],
-        "label": "3",
+        "label": "Apps",
         "icon": "",
         "action": {
-          "type": "hotkey",
+          "type": "navigate_folder",
           "params": {
-            "keys": "3"
+            "folder_id": "apps01"
           }
         }
       }
     ],
-    "children": [],
+    "children": [
+      {
+        "id": "apps01",
+        "name": "Apps",
+        "mapped_apps": [],
+        "buttons": [
+          {
+            "position": [0, 0],
+            "label": "Calculator",
+            "icon": "",
+            "action": {
+              "type": "launch_app",
+              "params": {
+                "path": "calc.exe"
+              }
+            }
+          },
+          {
+            "position": [0, 1],
+            "label": "Notepad",
+            "icon": "",
+            "action": {
+              "type": "launch_app",
+              "params": {
+                "path": "notepad.exe"
+              }
+            }
+          },
+          {
+            "position": [0, 2],
+            "label": "Explorer",
+            "icon": "",
+            "action": {
+              "type": "launch_app",
+              "params": {
+                "path": "explorer.exe"
+              }
+            }
+          },
+          {
+            "position": [1, 0],
+            "label": "Task Mgr",
+            "icon": "",
+            "action": {
+              "type": "launch_app",
+              "params": {
+                "path": "taskmgr.exe"
+              }
+            }
+          },
+          {
+            "position": [1, 1],
+            "label": "Snip",
+            "icon": "",
+            "action": {
+              "type": "hotkey",
+              "params": {
+                "keys": "win+shift+s"
+              }
+            }
+          },
+          {
+            "position": [1, 2],
+            "label": "CMD",
+            "icon": "",
+            "action": {
+              "type": "launch_app",
+              "params": {
+                "path": "cmd.exe"
+              }
+            }
+          },
+          {
+            "position": [2, 0],
+            "label": "Shortcuts",
+            "icon": "",
+            "action": {
+              "type": "navigate_folder",
+              "params": {
+                "folder_id": "short01"
+              }
+            }
+          }
+        ],
+        "children": [
+          {
+            "id": "short01",
+            "name": "Shortcuts",
+            "mapped_apps": [],
+            "buttons": [
+              {
+                "position": [0, 0],
+                "label": "Copy",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+c"
+                  }
+                }
+              },
+              {
+                "position": [0, 1],
+                "label": "Paste",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+v"
+                  }
+                }
+              },
+              {
+                "position": [0, 2],
+                "label": "Undo",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+z"
+                  }
+                }
+              },
+              {
+                "position": [1, 0],
+                "label": "Cut",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+x"
+                  }
+                }
+              },
+              {
+                "position": [1, 1],
+                "label": "Select All",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+a"
+                  }
+                }
+              },
+              {
+                "position": [1, 2],
+                "label": "Redo",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+y"
+                  }
+                }
+              },
+              {
+                "position": [2, 0],
+                "label": "Save",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "ctrl+s"
+                  }
+                }
+              },
+              {
+                "position": [2, 1],
+                "label": "Screenshot",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "print screen"
+                  }
+                }
+              },
+              {
+                "position": [2, 2],
+                "label": "Lock PC",
+                "icon": "",
+                "action": {
+                  "type": "hotkey",
+                  "params": {
+                    "keys": "win+l"
+                  }
+                }
+              }
+            ],
+            "children": [],
+            "expanded": true
+          }
+        ],
+        "expanded": true
+      }
+    ],
     "expanded": true
   }
 }

@@ -12,13 +12,10 @@ class MediaControlService:
 
     def _init_audio(self) -> None:
         try:
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+            from pycaw.pycaw import AudioUtilities
 
             devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            self._volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+            self._volume_interface = devices.EndpointVolume
             logger.info("Audio endpoint initialized")
         except Exception:
             logger.exception("Failed to initialize audio endpoint")

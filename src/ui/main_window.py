@@ -31,11 +31,12 @@ class TitleBar(QWidget):
         self._drag_pos: QPoint | None = None
         self.setObjectName("titleBar")
         self.setStyleSheet(TITLE_BAR_STYLE)
-        self.setFixedHeight(30)
+        self.setFixedHeight(50)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 0, 4, 0)
+        layout.setContentsMargins(8, 4, 4, 0)
         layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._title_label = QLabel("SteamDeckSoft")
         self._title_label.setStyleSheet("color: #e94560; font-size: 13px; font-weight: bold;")
@@ -43,12 +44,12 @@ class TitleBar(QWidget):
 
         # Folder tree toggle button
         btn_style = (
-            "QPushButton { background: transparent; color: #a0a0a0; border: none; font-size: 13px; }"
+            "QPushButton { background: transparent; color: #a0a0a0; border: none; font-size: 8px; }"
             "QPushButton:hover { background-color: #2a2a4a; color: #ffffff; border-radius: 4px; }"
         )
 
         self._tree_toggle_btn = QPushButton("\u2630")  # ☰
-        self._tree_toggle_btn.setFixedSize(28, 24)
+        self._tree_toggle_btn.setFixedSize(32, 30)
         self._tree_toggle_btn.setStyleSheet(btn_style)
         self._tree_toggle_btn.setToolTip("Toggle folder tree")
         self._tree_toggle_btn.clicked.connect(self._main_window.toggle_folder_tree)
@@ -58,7 +59,7 @@ class TitleBar(QWidget):
 
         # Opacity slider
         opacity_label = QLabel("\u25d0")
-        opacity_label.setStyleSheet("color: #a0a0a0; font-size: 12px;")
+        opacity_label.setStyleSheet("color: #a0a0a0; font-size: 8px;")
         opacity_label.setToolTip("Window opacity")
         layout.addWidget(opacity_label)
 
@@ -72,29 +73,12 @@ class TitleBar(QWidget):
         self._opacity_slider.valueChanged.connect(self._on_opacity_changed)
         layout.addWidget(self._opacity_slider)
 
-        tray_btn = QPushButton("\u23cf")
-        tray_btn.setFixedSize(28, 24)
+        tray_btn = QPushButton("\u25bc")
+        tray_btn.setFixedSize(32, 30)
         tray_btn.setStyleSheet(btn_style)
         tray_btn.setToolTip("Minimize to tray")
         tray_btn.clicked.connect(self._main_window._minimize_to_tray)
         layout.addWidget(tray_btn)
-
-        minimize_btn = QPushButton("\u2014")
-        minimize_btn.setFixedSize(28, 24)
-        minimize_btn.setStyleSheet(btn_style)
-        minimize_btn.setToolTip("Minimize")
-        minimize_btn.clicked.connect(self._main_window.showMinimized)
-        layout.addWidget(minimize_btn)
-
-        close_btn = QPushButton("\u2715")
-        close_btn.setFixedSize(28, 24)
-        close_btn.setStyleSheet(
-            "QPushButton { background: transparent; color: #a0a0a0; border: none; font-size: 13px; }"
-            "QPushButton:hover { background-color: #e94560; color: #ffffff; border-radius: 4px; }"
-        )
-        close_btn.setToolTip("Quit")
-        close_btn.clicked.connect(self._main_window._quit_app)
-        layout.addWidget(close_btn)
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -114,7 +98,10 @@ class TitleBar(QWidget):
         if action == settings_action:
             from .settings_dialog import SettingsDialog
             dialog = SettingsDialog(self._main_window._config_manager, self._main_window)
-            if dialog.exec():
+            self._main_window.set_numpad_passthrough(True)
+            result = dialog.exec()
+            self._main_window.set_numpad_passthrough(False)
+            if result:
                 self._main_window.reload_config()
         elif action == export_action:
             self._export_config()
@@ -234,6 +221,9 @@ class MainWindow(QMainWindow):
         self._apply_size(settings)
         self.setWindowOpacity(settings.window_opacity)
 
+        if settings.window_x is not None and settings.window_y is not None:
+            self.move(settings.window_x, settings.window_y)
+
     def _apply_size(self, settings=None) -> None:
         if settings is None:
             settings = self._config_manager.settings
@@ -243,7 +233,7 @@ class MainWindow(QMainWindow):
             + settings.button_spacing + 16 + tree_width
         )
         height = (
-            30  # title bar
+            55  # title bar
             + settings.grid_rows * (settings.button_size + settings.button_spacing)
             + settings.button_spacing
             + 16  # margins
@@ -318,16 +308,6 @@ class MainWindow(QMainWindow):
         for btn_cfg in folder.buttons:
             button_map[btn_cfg.position] = btn_cfg
 
-        # Auto-generate back button at (0,0) for non-root folders
-        if self._current_folder_id != "root":
-            parent = self._config_manager.find_parent_folder(self._current_folder_id)
-            if parent is not None:
-                button_map[(0, 0)] = ButtonConfig(
-                    position=(0, 0),
-                    label="\u2190 Back",
-                    action=ActionConfig(type="navigate_folder", params={"folder_id": parent.id}),
-                )
-
         for row in range(settings.grid_rows):
             for col in range(settings.grid_cols):
                 btn_cfg = button_map.get((row, col))
@@ -362,6 +342,10 @@ class MainWindow(QMainWindow):
     def set_input_detector(self, detector) -> None:
         self._input_detector = detector
 
+    def set_numpad_passthrough(self, value: bool) -> None:
+        if self._input_detector is not None:
+            self._input_detector.set_passthrough(value)
+
     def set_window_monitor(self, monitor) -> None:
         self._window_monitor = monitor
 
@@ -373,14 +357,35 @@ class MainWindow(QMainWindow):
             btn.update_monitor_data(cpu, ram)
 
     def show_on_primary(self) -> None:
+        settings = self._config_manager.settings
+        if settings.window_x is not None and settings.window_y is not None:
+            self.move(settings.window_x, settings.window_y)
+        else:
+            self._center_on_primary()
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+
+    def _center_on_primary(self) -> None:
         from PyQt6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
         geo = screen.availableGeometry()
         x = geo.x() + (geo.width() - self.width()) // 2
         y = geo.y()
         self.move(x, y)
-        self.show()
-        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+
+    def reset_position(self) -> None:
+        """Reset window position to center-top of primary screen."""
+        self._config_manager.settings.window_x = None
+        self._config_manager.settings.window_y = None
+        self._config_manager.save()
+        self._center_on_primary()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        pos = event.pos()
+        self._config_manager.settings.window_x = pos.x()
+        self._config_manager.settings.window_y = pos.y()
+        self._config_manager.save()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -425,6 +430,14 @@ class MainWindow(QMainWindow):
         btn = self._buttons.get((row, col))
         if btn is not None:
             btn.animateClick()
+
+    def navigate_back(self) -> None:
+        """Navigate to parent folder. Numpad 0 triggers this."""
+        if self._current_folder_id == "root":
+            return
+        parent = self._config_manager.find_parent_folder(self._current_folder_id)
+        if parent is not None:
+            self.switch_to_folder_id(parent.id)
 
     # --- Opacity -------------------------------------------------------
 

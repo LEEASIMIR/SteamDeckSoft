@@ -60,6 +60,7 @@ class SteamDeckSoftApp(QApplication):
         self._main_window = MainWindow(self._config_manager, self._action_registry)
         self._main_window.set_input_detector(self._input_detector)
         self._input_detector.numpad_signal.pressed.connect(self._main_window.on_global_numpad)
+        self._input_detector.numpad_signal.back_pressed.connect(self._main_window.navigate_back)
         self._input_detector.numpad_signal.numlock_changed.connect(self._on_numlock_changed)
         self._action_registry.set_main_window(self._main_window)
 

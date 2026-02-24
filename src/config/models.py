@@ -25,15 +25,22 @@ class ButtonConfig:
     position: tuple[int, int] = (0, 0)
     label: str = ""
     icon: str = ""
+    label_color: str = ""
+    label_size: int = 0
     action: ActionConfig = field(default_factory=ActionConfig)
 
     def to_dict(self) -> dict:
-        return {
+        d: dict[str, Any] = {
             "position": list(self.position),
             "label": self.label,
             "icon": self.icon,
             "action": self.action.to_dict(),
         }
+        if self.label_color:
+            d["label_color"] = self.label_color
+        if self.label_size:
+            d["label_size"] = self.label_size
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> ButtonConfig:
@@ -42,6 +49,8 @@ class ButtonConfig:
             position=(pos[0], pos[1]),
             label=data.get("label", ""),
             icon=data.get("icon", ""),
+            label_color=data.get("label_color", ""),
+            label_size=data.get("label_size", 0),
             action=ActionConfig.from_dict(data.get("action", {})),
         )
 
@@ -107,6 +116,8 @@ class AppSettings:
     global_hotkey: str = "ctrl+`"
     window_opacity: float = 0.9
     folder_tree_visible: bool = True
+    window_x: int | None = None
+    window_y: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -120,6 +131,8 @@ class AppSettings:
             "global_hotkey": self.global_hotkey,
             "window_opacity": self.window_opacity,
             "folder_tree_visible": self.folder_tree_visible,
+            "window_x": self.window_x,
+            "window_y": self.window_y,
         }
 
     @classmethod
@@ -135,6 +148,8 @@ class AppSettings:
             global_hotkey=data.get("global_hotkey", "ctrl+`"),
             window_opacity=max(0.2, min(1.0, data.get("window_opacity", 0.9))),
             folder_tree_visible=data.get("folder_tree_visible", True),
+            window_x=data.get("window_x"),
+            window_y=data.get("window_y"),
         )
 
 

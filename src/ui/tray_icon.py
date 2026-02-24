@@ -33,6 +33,10 @@ class TrayIcon(QSystemTrayIcon):
         settings_action.triggered.connect(self._open_settings)
         menu.addAction(settings_action)
 
+        reset_pos_action = QAction("Reset Position", menu)
+        reset_pos_action.triggered.connect(self._reset_position)
+        menu.addAction(reset_pos_action)
+
         menu.addSeparator()
 
         quit_action = QAction("Quit", menu)
@@ -55,6 +59,10 @@ class TrayIcon(QSystemTrayIcon):
         dialog = SettingsDialog(self._main_window._config_manager, self._main_window)
         if dialog.exec():
             self._main_window.reload_config()
+
+    def _reset_position(self) -> None:
+        self._main_window.reset_position()
+        self._main_window.show()
 
     def _quit_app(self) -> None:
         from PyQt6.QtWidgets import QApplication

@@ -208,8 +208,7 @@ QPushButton#deckButton {{
     color: #e0e0e0;
     border: 2px solid #0f3460;
     border-radius: 10px;
-    font-size: 11px;
-    font-weight: bold;
+    font-size: 15px;
     padding: 4px;
 }}
 
@@ -231,7 +230,7 @@ QPushButton#deckButton {
     color: #404050;
     border: 1px dashed #1e2a3a;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: 15px;
     padding: 4px;
 }
 
@@ -248,8 +247,7 @@ QPushButton#deckButton {
     color: #4caf50;
     border: 2px solid #1b5e20;
     border-radius: 10px;
-    font-size: 10px;
-    font-weight: bold;
+    font-size: 15px;
     padding: 4px;
 }
 """
@@ -309,5 +307,6 @@ TITLE_BAR_STYLE = """
 QWidget#titleBar {
     background-color: #111122;
     border-bottom: 1px solid #0f3460;
+    padding: 5px;
 }
 """

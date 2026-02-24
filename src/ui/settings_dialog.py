@@ -36,14 +36,6 @@ class SettingsDialog(QDialog):
         grid_group = QGroupBox("Grid Layout")
         grid_form = QFormLayout(grid_group)
 
-        self._rows_spin = QSpinBox()
-        self._rows_spin.setRange(1, 10)
-        grid_form.addRow("Rows:", self._rows_spin)
-
-        self._cols_spin = QSpinBox()
-        self._cols_spin.setRange(1, 10)
-        grid_form.addRow("Columns:", self._cols_spin)
-
         self._size_spin = QSpinBox()
         self._size_spin.setRange(50, 200)
         self._size_spin.setSuffix(" px")
@@ -100,8 +92,6 @@ class SettingsDialog(QDialog):
 
     def _load_settings(self) -> None:
         s = self._config_manager.settings
-        self._rows_spin.setValue(s.grid_rows)
-        self._cols_spin.setValue(s.grid_cols)
         self._size_spin.setValue(s.button_size)
         self._spacing_spin.setValue(s.button_spacing)
         self._auto_switch_check.setChecked(s.auto_switch_enabled)
@@ -118,8 +108,6 @@ class SettingsDialog(QDialog):
 
     def _apply_and_accept(self) -> None:
         s = self._config_manager.settings
-        s.grid_rows = self._rows_spin.value()
-        s.grid_cols = self._cols_spin.value()
         s.button_size = self._size_spin.value()
         s.button_spacing = self._spacing_spin.value()
         s.auto_switch_enabled = self._auto_switch_check.isChecked()

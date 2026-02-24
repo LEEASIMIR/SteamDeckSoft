@@ -21,25 +21,19 @@ class LaunchAppAction(ActionBase):
             return
 
         try:
-            cmd = [path]
-            if args:
-                cmd.extend(args.split())
-
-            kwargs: dict[str, Any] = {
-                "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            }
-            if working_dir and os.path.isdir(working_dir):
-                kwargs["cwd"] = working_dir
-
-            subprocess.Popen(cmd, **kwargs)
-            logger.info("Launched: %s", path)
-        except FileNotFoundError:
-            # Try with shell for system apps like calc.exe
-            try:
+            if not args:
+                # os.startfile handles GUI apps, console apps, documents, URLs correctly
                 os.startfile(path)
                 logger.info("Launched via startfile: %s", path)
-            except Exception:
-                logger.exception("Failed to launch app: %s", path)
+            else:
+                cmd = [path] + args.split()
+                kwargs: dict[str, Any] = {
+                    "creationflags": subprocess.CREATE_NEW_CONSOLE,
+                }
+                if working_dir and os.path.isdir(working_dir):
+                    kwargs["cwd"] = working_dir
+                subprocess.Popen(cmd, **kwargs)
+                logger.info("Launched: %s %s", path, args)
         except Exception:
             logger.exception("Failed to launch app: %s", path)
 

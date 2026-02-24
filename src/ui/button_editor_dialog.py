@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QPushButton, QCheckBox, QTextEdit,
     QDialogButtonBox, QGroupBox, QFileDialog, QWidget, QStackedWidget,
-    QListWidget, QSpinBox, QListWidgetItem,
+    QListWidget, QSpinBox, QListWidgetItem, QColorDialog,
 )
 
 from ..config.models import ButtonConfig, ActionConfig
@@ -250,6 +250,31 @@ class ButtonEditorDialog(QDialog):
         icon_row.addWidget(icon_browse)
         basic_form.addRow("Icon:", icon_row)
 
+        color_row = QHBoxLayout()
+        self._label_color_edit = QLineEdit()
+        self._label_color_edit.setPlaceholderText("#ffffff (default)")
+        self._label_color_edit.textChanged.connect(self._update_color_preview)
+        color_row.addWidget(self._label_color_edit)
+        self._color_preview = QPushButton()
+        self._color_preview.setFixedSize(30, 30)
+        self._color_preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._color_preview.clicked.connect(self._pick_label_color)
+        self._color_preview.setStyleSheet(
+            "QPushButton { background-color: #ffffff; border: 1px solid #555; border-radius: 4px; }"
+        )
+        color_row.addWidget(self._color_preview)
+        color_clear = QPushButton("Clear")
+        color_clear.setFixedWidth(50)
+        color_clear.clicked.connect(lambda: self._label_color_edit.setText(""))
+        color_row.addWidget(color_clear)
+        basic_form.addRow("Label Color:", color_row)
+
+        self._label_size_spin = QSpinBox()
+        self._label_size_spin.setRange(0, 72)
+        self._label_size_spin.setSpecialValueText("Default")
+        self._label_size_spin.setSuffix(" px")
+        basic_form.addRow("Font Size:", self._label_size_spin)
+
         layout.addWidget(basic_group)
 
         # Action type
@@ -427,6 +452,9 @@ class ButtonEditorDialog(QDialog):
     def _load_config(self) -> None:
         self._label_edit.setText(self._config.label)
         self._icon_edit.setText(self._config.icon)
+        self._label_color_edit.setText(self._config.label_color)
+        self._update_color_preview(self._config.label_color)
+        self._label_size_spin.setValue(self._config.label_size)
 
         # Load folders into combo
         self._populate_folder_combo()
@@ -490,6 +518,19 @@ class ButtonEditorDialog(QDialog):
         if path:
             self._icon_edit.setText(path)
 
+    def _pick_label_color(self) -> None:
+        from PyQt6.QtGui import QColor
+        initial = QColor(self._label_color_edit.text() or "#ffffff")
+        color = QColorDialog.getColor(initial, self, "Label Color")
+        if color.isValid():
+            self._label_color_edit.setText(color.name())
+
+    def _update_color_preview(self, text: str) -> None:
+        color = text.strip() if text.strip() else "#ffffff"
+        self._color_preview.setStyleSheet(
+            f"QPushButton {{ background-color: {color}; border: 1px solid #555; border-radius: 4px; }}"
+        )
+
     def _browse_app(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Application", "", "Executables (*.exe);;All Files (*)"
@@ -525,6 +566,8 @@ class ButtonEditorDialog(QDialog):
             position=(self._row, self._col),
             label=self._label_edit.text(),
             icon=self._icon_edit.text(),
+            label_color=self._label_color_edit.text().strip(),
+            label_size=self._label_size_spin.value(),
             action=ActionConfig(type=action_type or "", params=params),
         )
 
