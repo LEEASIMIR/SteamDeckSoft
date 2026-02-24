@@ -9,7 +9,7 @@
     "always_on_top": true,
     "theme": "dark",
     "global_hotkey": "ctrl+`",
-    "window_opacity": 0.9,
+    "window_opacity": 1.0,
     "folder_tree_visible": true
   },
   "root_folder": {
@@ -197,6 +197,28 @@
               "type": "navigate_folder",
               "params": {
                 "folder_id": "short01"
+              }
+            }
+          },
+          {
+            "position": [2, 1],
+            "label": "YouTube",
+            "icon": "",
+            "action": {
+              "type": "open_url",
+              "params": {
+                "url": "https://youtube.com"
+              }
+            }
+          },
+          {
+            "position": [2, 2],
+            "label": "Google",
+            "icon": "",
+            "action": {
+              "type": "open_url",
+              "params": {
+                "url": "https://google.com"
               }
             }
           }

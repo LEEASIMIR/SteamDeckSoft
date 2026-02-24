@@ -16,6 +16,7 @@ WM_KEYDOWN = 0x0100
 WM_KEYUP = 0x0101
 WM_SYSKEYDOWN = 0x0104
 WM_SYSKEYUP = 0x0105
+WM_TIMER = 0x0113
 VK_NUMLOCK = 0x90
 
 user32 = ctypes.windll.user32
@@ -72,9 +73,12 @@ class InputDetector:
         0x22: (2, 2),  # VK_NEXT   → numpad 3
     }
 
+    _REHOOK_INTERVAL_MS = 5000  # Reinstall hook every 5 seconds
+
     def __init__(self) -> None:
         self._last_injected = False
         self._hook = None
+        self._timer_id = 0
         self._thread: threading.Thread | None = None
         self._running = False
         self._passthrough = False
@@ -163,6 +167,22 @@ class InputDetector:
 
         return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
 
+    def _reinstall_hook(self) -> None:
+        """Reinstall keyboard hook to recover from silent removal by Windows.
+
+        Windows removes WH_KEYBOARD_LL hooks if the callback doesn't return
+        within LowLevelHooksTimeout (~300ms). This can happen when the Python
+        GIL is held by the main thread (e.g. during heavy UI rendering on
+        multi-monitor setups with different DPI scaling).
+        """
+        if self._hook:
+            user32.UnhookWindowsHookEx(self._hook)
+        self._hook = user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, self._proc, None, 0
+        )
+        if not self._hook:
+            logger.warning("Failed to reinstall keyboard hook")
+
     def _run(self) -> None:
         self._hook = user32.SetWindowsHookExW(
             WH_KEYBOARD_LL, self._proc, None, 0
@@ -172,14 +192,24 @@ class InputDetector:
             return
         logger.info("InputDetector hook installed")
 
+        # Periodic timer to guard against Windows silently removing the hook
+        self._timer_id = user32.SetTimer(None, 0, self._REHOOK_INTERVAL_MS, None)
+
         msg = ctypes.wintypes.MSG()
         while self._running:
             ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
             if ret <= 0:
                 break
+            if msg.message == WM_TIMER:
+                self._reinstall_hook()
+                continue
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
-        user32.UnhookWindowsHookEx(self._hook)
-        self._hook = None
+        if self._timer_id:
+            user32.KillTimer(None, self._timer_id)
+            self._timer_id = 0
+        if self._hook:
+            user32.UnhookWindowsHookEx(self._hook)
+            self._hook = None
         logger.info("InputDetector hook removed")

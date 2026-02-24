@@ -190,6 +190,7 @@ ACTION_TYPES = [
     ("media_control", "Media Control"),
     ("system_monitor", "System Monitor"),
     ("navigate_folder", "Navigate Folder"),
+    ("open_url", "Open URL"),
     ("macro", "Macro"),
 ]
 
@@ -356,6 +357,14 @@ class ButtonEditorDialog(QDialog):
         navigate_form.addRow("Target Folder:", self._folder_combo)
         self._params_stack.addWidget(navigate_page)
 
+        # Open URL page
+        url_page = QWidget()
+        url_form = QFormLayout(url_page)
+        self._url_edit = QLineEdit()
+        self._url_edit.setPlaceholderText("https://example.com")
+        url_form.addRow("URL:", self._url_edit)
+        self._params_stack.addWidget(url_page)
+
         # Macro page
         macro_page = QWidget()
         macro_layout = QVBoxLayout(macro_page)
@@ -487,6 +496,8 @@ class ButtonEditorDialog(QDialog):
                 if self._media_combo.itemData(i) == cmd:
                     self._media_combo.setCurrentIndex(i)
                     break
+        elif orig_type == "open_url":
+            self._url_edit.setText(params.get("url", ""))
         elif orig_type in ("navigate_page", "navigate_folder"):
             folder_id = params.get("folder_id", "") or params.get("page_id", "")
             for i in range(self._folder_combo.count()):
@@ -507,7 +518,8 @@ class ButtonEditorDialog(QDialog):
             "media_control": 4,
             "system_monitor": 5,
             "navigate_folder": 6,
-            "macro": 7,
+            "open_url": 7,
+            "macro": 8,
         }
         self._params_stack.setCurrentIndex(type_to_page.get(action_type, 0))
 
@@ -557,6 +569,8 @@ class ButtonEditorDialog(QDialog):
             params["command"] = self._media_combo.currentData()
         elif action_type == "system_monitor":
             params["display"] = "cpu_ram"
+        elif action_type == "open_url":
+            params["url"] = self._url_edit.text()
         elif action_type == "navigate_folder":
             params["folder_id"] = self._folder_combo.currentData() or ""
         elif action_type == "macro":

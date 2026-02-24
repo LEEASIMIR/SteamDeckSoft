@@ -17,13 +17,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_BUTTON_COLORS = [
-    {"bg": "#16213e", "hover": "#1a2a50", "pressed": "#0f3460"},
-    {"bg": "#1a1a3e", "hover": "#2a2050", "pressed": "#1a0f60"},
-    {"bg": "#1e2a1e", "hover": "#2a3a2a", "pressed": "#1a3a1a"},
-    {"bg": "#2a1a1a", "hover": "#3a2a2a", "pressed": "#3a1a1a"},
-    {"bg": "#1a2a2a", "hover": "#2a3a3a", "pressed": "#1a3a3a"},
-]
 
 
 class DeckButton(QPushButton):
@@ -67,9 +60,7 @@ class DeckButton(QPushButton):
         if self._config.action.type == "system_monitor":
             style = MONITOR_BUTTON_STYLE
         else:
-            color_index = (self._row * 5 + self._col) % len(_BUTTON_COLORS)
-            colors = _BUTTON_COLORS[color_index]
-            style = DECK_BUTTON_STYLE.format(**colors)
+            style = DECK_BUTTON_STYLE
 
         overrides: list[str] = []
         if self._config.label_color:

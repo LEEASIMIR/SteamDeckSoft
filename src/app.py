@@ -4,7 +4,6 @@ import logging
 import sys
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QSharedMemory
 
 from .config.manager import ConfigManager
 from .actions.registry import ActionRegistry
@@ -15,6 +14,7 @@ from .actions.system_monitor import SystemMonitorAction
 from .actions.navigate import NavigateFolderAction
 from .actions.text_input import TextInputAction
 from .actions.macro import MacroAction
+from .actions.open_url import OpenUrlAction
 from .services.media_control import MediaControlService
 from .services.system_stats import SystemStatsService
 from .services.window_monitor import ActiveWindowMonitor
@@ -23,6 +23,7 @@ from .services.input_detector import InputDetector
 from .ui.main_window import MainWindow
 from .ui.tray_icon import TrayIcon
 from .ui.styles import DARK_THEME
+from .ui.splash import Splash
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +34,12 @@ class SteamDeckSoftApp(QApplication):
         self.setApplicationName("SteamDeckSoft")
         self.setQuitOnLastWindowClosed(False)
 
-        # Single instance check
-        self._shared_memory = QSharedMemory("SteamDeckSoft_SingleInstance")
-        if self._shared_memory.attach():
-            logger.warning("Another instance is already running.")
-            self._already_running = True
-            return
-        self._shared_memory.create(1)
-        self._already_running = False
-
         self._setup_logging()
+
+        # Splash screen
+        self._splash = Splash()
+        self._splash.show_and_close()
+        self.processEvents()
 
         # Config
         self._config_manager = ConfigManager()
@@ -87,10 +84,6 @@ class SteamDeckSoftApp(QApplication):
         else:
             self._main_window.show()
 
-    @property
-    def already_running(self) -> bool:
-        return self._already_running
-
     def _setup_logging(self) -> None:
         log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
         logging.basicConfig(
@@ -114,6 +107,7 @@ class SteamDeckSoftApp(QApplication):
         self._action_registry.register("media_control", media_action)
 
         self._action_registry.register("system_monitor", SystemMonitorAction())
+        self._action_registry.register("open_url", OpenUrlAction())
 
         nav_action = NavigateFolderAction(self._action_registry)
         self._action_registry.register("navigate_folder", nav_action)
@@ -152,6 +146,8 @@ class SteamDeckSoftApp(QApplication):
 
     def cleanup(self) -> None:
         logger.info("Shutting down...")
+        if hasattr(self, "_tray_icon"):
+            self._tray_icon.hide()
         if hasattr(self, "_global_hotkey"):
             self._global_hotkey.stop()
         if hasattr(self, "_input_detector"):

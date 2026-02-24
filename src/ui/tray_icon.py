@@ -57,7 +57,10 @@ class TrayIcon(QSystemTrayIcon):
     def _open_settings(self) -> None:
         from .settings_dialog import SettingsDialog
         dialog = SettingsDialog(self._main_window._config_manager, self._main_window)
-        if dialog.exec():
+        self._main_window.set_numpad_passthrough(True)
+        result = dialog.exec()
+        self._main_window.set_numpad_passthrough(False)
+        if result:
             self._main_window.reload_config()
 
     def _reset_position(self) -> None:

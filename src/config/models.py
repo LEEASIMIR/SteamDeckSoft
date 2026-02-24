@@ -114,7 +114,7 @@ class AppSettings:
     always_on_top: bool = True
     theme: str = "dark"
     global_hotkey: str = "ctrl+`"
-    window_opacity: float = 0.9
+    window_opacity: float = 1.0
     folder_tree_visible: bool = True
     window_x: int | None = None
     window_y: int | None = None
