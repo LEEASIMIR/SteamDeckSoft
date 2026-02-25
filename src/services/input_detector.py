@@ -3,280 +3,258 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import logging
-import threading
+import os
+import subprocess
+import sys
+import time
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-LLKHF_INJECTED = 0x00000010
-LLKHF_EXTENDED = 0x00000001
-WH_KEYBOARD_LL = 13
-WM_KEYDOWN = 0x0100
-WM_KEYUP = 0x0101
-WM_SYSKEYDOWN = 0x0104
-WM_SYSKEYUP = 0x0105
-WM_TIMER = 0x0113
 VK_NUMLOCK = 0x90
-
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-# ---------- Win32 API type declarations (64-bit safe) ----------
-
-# CallNextHookEx
-user32.CallNextHookEx.argtypes = [
-    ctypes.wintypes.HHOOK,
-    ctypes.c_int,
-    ctypes.wintypes.WPARAM,
-    ctypes.wintypes.LPARAM,
+# Setup argtypes for shared memory APIs
+kernel32.OpenFileMappingW.argtypes = [
+    ctypes.wintypes.DWORD, ctypes.wintypes.BOOL, ctypes.wintypes.LPCWSTR,
 ]
-user32.CallNextHookEx.restype = ctypes.wintypes.LPARAM
+kernel32.OpenFileMappingW.restype = ctypes.wintypes.HANDLE
 
-# SetWindowsHookExW — returns HHOOK (pointer-sized, 64-bit on x64)
-user32.SetWindowsHookExW.argtypes = [
-    ctypes.c_int,             # idHook
-    ctypes.c_void_p,          # lpfn (HOOKPROC)
-    ctypes.wintypes.HINSTANCE,  # hMod
-    ctypes.wintypes.DWORD,    # dwThreadId
+kernel32.MapViewOfFile.argtypes = [
+    ctypes.wintypes.HANDLE, ctypes.wintypes.DWORD,
+    ctypes.wintypes.DWORD, ctypes.wintypes.DWORD, ctypes.c_size_t,
 ]
-user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+kernel32.MapViewOfFile.restype = ctypes.c_void_p
 
-# UnhookWindowsHookEx
-user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HHOOK]
-user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
+kernel32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+kernel32.UnmapViewOfFile.restype = ctypes.wintypes.BOOL
 
-# UINT_PTR: pointer-sized unsigned integer (64-bit on x64)
-UINT_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint
+kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
+kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
 
-# SetTimer — returns UINT_PTR (64-bit on x64); without this, the
-# default c_int (32-bit) truncates the timer ID, making it impossible
-# to match against WM_TIMER wParam and the rehook timer never fires.
-user32.SetTimer.argtypes = [
-    ctypes.wintypes.HWND,
-    UINT_PTR,
-    ctypes.wintypes.UINT,
-    ctypes.c_void_p,          # TIMERPROC (NULL for WM_TIMER)
-]
-user32.SetTimer.restype = UINT_PTR
-
-# KillTimer
-user32.KillTimer.argtypes = [ctypes.wintypes.HWND, UINT_PTR]
-user32.KillTimer.restype = ctypes.wintypes.BOOL
-
-# GetModuleHandleW
-kernel32.GetModuleHandleW.argtypes = [ctypes.wintypes.LPCWSTR]
-kernel32.GetModuleHandleW.restype = ctypes.wintypes.HMODULE
-
-# Module handle of current process — needed for SetWindowsHookExW
-_hmod = kernel32.GetModuleHandleW(None)
-
-# HOOKPROC: must use LPARAM (pointer-sized) for return and lParam
-HOOKPROC = ctypes.CFUNCTYPE(
-    ctypes.wintypes.LPARAM,  # return
-    ctypes.c_int,            # nCode
-    ctypes.wintypes.WPARAM,  # wParam
-    ctypes.wintypes.LPARAM,  # lParam
-)
+SHM_NAME = "Local\\SteamDeckSoft_NumpadHook"
+FILE_MAP_ALL_ACCESS = 0x000F001F
+MAX_EVENTS = 256
 
 
-class KBDLLHOOKSTRUCT(ctypes.Structure):
+class _SharedData(ctypes.Structure):
+    """Must match the C struct in numpad_hook.c exactly."""
+    _pack_ = 1
     _fields_ = [
-        ("vkCode", ctypes.wintypes.DWORD),
-        ("scanCode", ctypes.wintypes.DWORD),
-        ("flags", ctypes.wintypes.DWORD),
-        ("time", ctypes.wintypes.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("ev_write",      ctypes.c_long),
+        ("ev_read",       ctypes.c_long),
+        ("events",        ctypes.c_int * MAX_EVENTS),
+        ("nl_changed",    ctypes.c_long),
+        ("nl_new_state",  ctypes.c_int),
+        ("passthrough",   ctypes.c_int),
+        ("numlock_off",   ctypes.c_int),
+        ("running",       ctypes.c_int),
+        ("any_key_count", ctypes.c_long),
+        ("suppressed",    ctypes.c_long),
+        ("numpad_seen",   ctypes.c_long),
+        ("hook_ok",       ctypes.c_long),
     ]
 
 
 class _NumpadSignal(QObject):
-    """Bridge to emit numpad presses from the hook thread to the Qt main thread."""
     pressed = pyqtSignal(int, int)
     back_pressed = pyqtSignal()
-    numlock_changed = pyqtSignal(bool)  # True = Num Lock ON, False = OFF
+    numlock_changed = pyqtSignal(bool)
+
+
+def _find_hook_dll() -> str:
+    """Locate numpad_hook.dll next to the exe or in src/native/."""
+    if getattr(sys, "frozen", False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+
+    candidates = [
+        os.path.join(base, "numpad_hook.dll"),
+        os.path.join(base, "..", "native", "numpad_hook.dll"),
+        os.path.join(base, "native", "numpad_hook.dll"),
+    ]
+    for p in candidates:
+        norm = os.path.normpath(p)
+        if os.path.isfile(norm):
+            return norm
+    raise FileNotFoundError(
+        f"numpad_hook.dll not found in: {[os.path.normpath(c) for c in candidates]}"
+    )
 
 
 class InputDetector:
-    """Tracks injected keys and provides global numpad shortcuts (Num Lock OFF only)."""
+    """Numpad key capture using rundll32.exe hosting our C hook DLL.
 
-    # When Num Lock is OFF, numpad keys send navigation VK codes WITHOUT the extended flag.
-    # Regular arrow/Home/End keys send the SAME VK codes but WITH the extended flag.
-    _NUMPAD_MAP: dict[int, tuple[int, int]] = {
-        0x24: (0, 0),  # VK_HOME   → numpad 7
-        0x26: (0, 1),  # VK_UP     → numpad 8
-        0x21: (0, 2),  # VK_PRIOR  → numpad 9
-        0x25: (1, 0),  # VK_LEFT   → numpad 4
-        0x0C: (1, 1),  # VK_CLEAR  → numpad 5
-        0x27: (1, 2),  # VK_RIGHT  → numpad 6
-        0x23: (2, 0),  # VK_END    → numpad 1
-        0x28: (2, 1),  # VK_DOWN   → numpad 2
-        0x22: (2, 2),  # VK_NEXT   → numpad 3
+    rundll32.exe (a trusted Windows system binary) loads numpad_hook.dll
+    in a separate process — completely independent of Python/PyInstaller.
+    The DLL installs a WH_KEYBOARD_LL hook and communicates events via
+    a named shared-memory region that we poll via QTimer.
+    """
+
+    _NUMPAD_SCAN_MAP: dict[int, tuple[int, int]] = {
+        71: (0, 0), 72: (0, 1), 73: (0, 2),
+        75: (1, 0), 76: (1, 1), 77: (1, 2),
+        79: (2, 0), 80: (2, 1), 81: (2, 2),
     }
+    _NUMPAD_BACK_SCAN = 82
 
-    _POLL_MS = 50  # Single timer interval for polling + hook health
-    _REHOOK_TICKS = 20  # Reinstall hook every 20 ticks (= ~1 second)
+    _POLL_INTERVAL_MS = 16  # ~60 Hz
 
     def __init__(self) -> None:
-        self._last_injected = False
-        self._hook = None
-        self._timer_id = 0
-        self._tick_count = 0
-        self._thread: threading.Thread | None = None
-        self._running = False
-        self._passthrough = False
-        self._proc = HOOKPROC(self._hook_proc)
+        self._proc: subprocess.Popen | None = None
+        self._shm_ptr: int = 0  # raw address for UnmapViewOfFile
+        self._shm: _SharedData | None = None
+        self._hMap = None
+        self._poll_timer: QTimer | None = None
+        self._debug_timer: QTimer | None = None
         self.numpad_signal = _NumpadSignal()
-        self._last_numlock_state: bool | None = None
+
+    # -- public API -------------------------------------------------------
 
     def set_passthrough(self, value: bool) -> None:
-        """When True, numpad keys pass through to the active window (for dialogs)."""
-        self._passthrough = value
+        if self._shm is not None:
+            self._shm.passthrough = 1 if value else 0
 
     @property
     def last_was_injected(self) -> bool:
-        return self._last_injected
+        return False
 
     @staticmethod
     def is_numlock_on() -> bool:
-        """Return True if Num Lock is currently active."""
         return bool(user32.GetKeyState(VK_NUMLOCK) & 1)
 
     def start(self) -> None:
-        if self._running:
+        dll_path = _find_hook_dll()
+        logger.info("Starting hook via rundll32: %s", dll_path)
+
+        # Launch rundll32.exe hosting our hook DLL (hidden window)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        # rundll32 syntax: rundll32.exe "path\to.dll",EntryPoint [args]
+        # Pass our PID so the DLL exits if we crash.
+        self._proc = subprocess.Popen(
+            f'rundll32.exe "{dll_path}",start_entry {os.getpid()}',
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+        # Wait for the process to create shared memory
+        self._hMap = None
+        for _ in range(100):  # up to 1s
+            self._hMap = kernel32.OpenFileMappingW(
+                FILE_MAP_ALL_ACCESS, False, SHM_NAME,
+            )
+            if self._hMap:
+                break
+            time.sleep(0.01)
+
+        if not self._hMap:
+            logger.error("Failed to open shared memory — hook process may have crashed")
+            self._kill_proc()
             return
-        self._running = True
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+
+        self._shm_ptr = kernel32.MapViewOfFile(
+            self._hMap, FILE_MAP_ALL_ACCESS, 0, 0, ctypes.sizeof(_SharedData),
+        )
+        if not self._shm_ptr:
+            logger.error("MapViewOfFile failed")
+            kernel32.CloseHandle(self._hMap)
+            self._hMap = None
+            self._kill_proc()
+            return
+
+        self._shm = _SharedData.from_address(self._shm_ptr)
+        logger.info(
+            "InputDetector started (rundll32, pid=%d, hook_ok=%d)",
+            self._proc.pid, self._shm.hook_ok,
+        )
+
+        # Start polling
+        self._poll_timer = QTimer()
+        self._poll_timer.setInterval(self._POLL_INTERVAL_MS)
+        self._poll_timer.timeout.connect(self._poll)
+        self._poll_timer.start()
+
+        self._debug_timer = QTimer()
+        self._debug_timer.setInterval(3000)
+        self._debug_timer.timeout.connect(self._debug_log)
+        self._debug_timer.start()
 
     def stop(self) -> None:
-        self._running = False
-        if self._thread and self._thread.is_alive():
-            thread_id = self._thread.ident
-            if thread_id:
-                user32.PostThreadMessageW(thread_id, 0x0012, 0, 0)
-            self._thread.join(timeout=2)
+        if self._debug_timer is not None:
+            self._debug_timer.stop()
+            self._debug_timer = None
+        if self._poll_timer is not None:
+            self._poll_timer.stop()
+            self._poll_timer = None
 
-    def _is_numpad_zero(self, kb: KBDLLHOOKSTRUCT) -> bool:
-        """Check if key is numpad 0 (VK_INSERT when Num Lock OFF, non-extended)."""
-        if kb.flags & LLKHF_INJECTED:
-            return False
-        if kb.flags & LLKHF_EXTENDED:
-            return False
-        if user32.GetKeyState(VK_NUMLOCK) & 1:
-            return False
-        return kb.vkCode == 0x2D  # VK_INSERT
+        # Tell the helper process to exit gracefully
+        if self._shm is not None:
+            self._shm.running = 0
 
-    def _is_numpad_nav_key(self, kb: KBDLLHOOKSTRUCT) -> tuple[int, int] | None:
-        """Check if key is a numpad navigation key (Num Lock OFF, non-extended, non-injected)."""
-        if kb.flags & LLKHF_INJECTED:
-            return None
-        if kb.flags & LLKHF_EXTENDED:
-            return None
-        if user32.GetKeyState(VK_NUMLOCK) & 1:
-            return None
-        return self._NUMPAD_MAP.get(kb.vkCode)
+        # Cleanup shared memory
+        if self._shm_ptr:
+            kernel32.UnmapViewOfFile(self._shm_ptr)
+            self._shm_ptr = 0
+            self._shm = None
+        if self._hMap:
+            kernel32.CloseHandle(self._hMap)
+            self._hMap = None
 
-    def _hook_proc(self, nCode, wParam, lParam):
-        if nCode >= 0:
-            kb = ctypes.cast(lParam, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+        self._kill_proc()
+        logger.info("InputDetector stopped")
 
-            if wParam in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                self._last_injected = bool(kb.flags & LLKHF_INJECTED)
+    # -- internals --------------------------------------------------------
 
-                # Detect Num Lock toggle
-                if kb.vkCode == VK_NUMLOCK:
-                    # Hook fires before state flips, so invert current state
-                    will_be_on = not bool(user32.GetKeyState(VK_NUMLOCK) & 1)
-                    self._last_numlock_state = will_be_on
-                    self.numpad_signal.numlock_changed.emit(will_be_on)
+    def _kill_proc(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
 
-                if not self._passthrough:
-                    pos = self._is_numpad_nav_key(kb)
-                    if pos is not None:
-                        self.numpad_signal.pressed.emit(pos[0], pos[1])
-                        return 1  # suppress
-
-                    # Numpad 0 (VK_INSERT when Num Lock OFF, non-extended)
-                    if self._is_numpad_zero(kb):
-                        self.numpad_signal.back_pressed.emit()
-                        return 1
-
-            elif wParam in (WM_KEYUP, WM_SYSKEYUP):
-                if not self._passthrough:
-                    # Suppress matching key-up to avoid orphan events
-                    if self._is_numpad_nav_key(kb) is not None:
-                        return 1
-                    if self._is_numpad_zero(kb):
-                        return 1
-
-        return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
-
-    def _on_tick(self) -> None:
-        """Called every 50ms: poll Num Lock + periodically reinstall hook."""
-        # Always poll Num Lock state (catches missed hook events)
-        current = bool(user32.GetKeyState(VK_NUMLOCK) & 1)
-        if current != self._last_numlock_state:
-            self._last_numlock_state = current
-            self.numpad_signal.numlock_changed.emit(current)
-
-        # Reinstall hook every ~1 second (20 ticks × 50ms)
-        self._tick_count += 1
-        if self._tick_count >= self._REHOOK_TICKS:
-            self._tick_count = 0
-            self._reinstall_hook()
-
-    def _reinstall_hook(self) -> None:
-        """Reinstall keyboard hook to recover from silent removal by Windows.
-
-        Windows removes WH_KEYBOARD_LL hooks if the callback doesn't return
-        within LowLevelHooksTimeout (~300ms). This can happen when the Python
-        GIL is held by the main thread (e.g. during heavy UI rendering on
-        multi-monitor setups with different DPI scaling).
-        """
-        if self._hook:
-            user32.UnhookWindowsHookEx(self._hook)
-        self._hook = user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._proc, _hmod, 0
-        )
-        if not self._hook:
-            logger.warning("Failed to reinstall keyboard hook")
-        else:
-            logger.debug("Keyboard hook reinstalled successfully")
-
-    def _run(self) -> None:
-        self._hook = user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._proc, _hmod, 0
-        )
-        if not self._hook:
-            logger.error("Failed to install keyboard hook")
+    def _poll(self) -> None:
+        shm = self._shm
+        if shm is None:
             return
-        logger.info("InputDetector hook installed")
 
-        # Initialize last known Num Lock state
-        self._last_numlock_state = bool(user32.GetKeyState(VK_NUMLOCK) & 1)
-
-        # Single 50ms timer handles both Num Lock polling and periodic hook reinstall
-        self._timer_id = int(user32.SetTimer(None, 0, self._POLL_MS, None))
-        self._tick_count = 0
-
-        logger.info("InputDetector timer started (id=%s, interval=%dms)", self._timer_id, self._POLL_MS)
-
-        msg = ctypes.wintypes.MSG()
-        while self._running:
-            ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-            if ret <= 0:
+        # Drain ring buffer (we are the only consumer — no atomics needed)
+        for _ in range(MAX_EVENTS):
+            r = shm.ev_read
+            if r == shm.ev_write:
                 break
-            if msg.message == WM_TIMER and int(msg.wParam) == self._timer_id:
-                self._on_tick()
-                continue
-            user32.TranslateMessage(ctypes.byref(msg))
-            user32.DispatchMessageW(ctypes.byref(msg))
+            scan = shm.events[r]
+            shm.ev_read = (r + 1) % MAX_EVENTS
 
-        if self._timer_id:
-            user32.KillTimer(None, self._timer_id)
-            self._timer_id = 0
-        if self._hook:
-            user32.UnhookWindowsHookEx(self._hook)
-            self._hook = None
-        logger.info("InputDetector hook removed")
+            pos = self._NUMPAD_SCAN_MAP.get(scan)
+            if pos is not None:
+                self.numpad_signal.pressed.emit(pos[0], pos[1])
+            elif scan == self._NUMPAD_BACK_SCAN:
+                self.numpad_signal.back_pressed.emit()
+
+        # Num Lock change
+        if shm.nl_changed:
+            shm.nl_changed = 0
+            is_on = bool(shm.nl_new_state)
+            logger.info("Num Lock changed: %s", "ON" if is_on else "OFF")
+            self.numpad_signal.numlock_changed.emit(is_on)
+
+    def _debug_log(self) -> None:
+        shm = self._shm
+        if shm is None:
+            return
+        logger.info(
+            "Hook process: hook=%d any_keys=%d numpad_seen=%d "
+            "suppressed=%d numlock_off=%d",
+            shm.hook_ok, shm.any_key_count, shm.numpad_seen,
+            shm.suppressed, shm.numlock_off,
+        )

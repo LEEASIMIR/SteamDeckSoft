@@ -1,9 +1,10 @@
 @echo off
 echo === SteamDeckSoft Build ===
 
-pyinstaller --noconfirm --onefile --windowed ^
+pyinstaller --noconfirm --clean --onefile --windowed ^
     --name SteamDeckSoft ^
     --add-data "config;config" ^
+    --add-binary "src\native\numpad_hook.dll;." ^
     --hidden-import comtypes.stream ^
     --hidden-import pycaw.utils ^
     main.py

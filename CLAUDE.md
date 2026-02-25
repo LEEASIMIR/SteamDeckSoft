@@ -40,12 +40,28 @@ Dependencies: `pip install -r requirements.txt` (requires Windows — uses pywin
    - `SystemStatsService(QThread)` — polls CPU/RAM via psutil, emits `stats_updated(float, float)`
    - `ActiveWindowMonitor(QThread)` — polls foreground window via win32gui/win32process, emits `active_app_changed(str)` to drive auto-folder-switching
    - `MediaControlService` — wraps pycaw `AudioDevice.EndpointVolume` for volume control (not a QThread, plain helper; pycaw ≥20251023 uses `.EndpointVolume` property instead of legacy `.Activate()` COM call)
-   - `GlobalHotkeyService(QObject)` — registers system-wide hotkey via `keyboard` library, emits `triggered` signal connected to `MainWindow.toggle_visibility`. Supports live rebinding via `update_hotkey()`. Has periodic hook refresh (`QTimer`, 5s interval) that re-registers the hotkey to recover from silent hook removal by Windows.
-   - `InputDetector` — plain Python class using `ctypes` Win32 `WH_KEYBOARD_LL` hook in a daemon thread to detect injected (software-generated) keystrokes. Exposes `last_was_injected: bool`, used by `MainWindow.keyPressEvent` to prevent recursive triggering from `keyboard.send()`. Also detects Num Lock toggles and emits `numpad_signal.numlock_changed(bool)` to drive window visibility (Num Lock ON → hide, OFF → show). Numpad 0 (VK_INSERT when Num Lock OFF) emits `numpad_signal.back_pressed` → `MainWindow.navigate_back()` to go to parent folder. Static method `is_numlock_on()` checks current state at startup. Has `_passthrough` flag toggled via `set_passthrough(bool)` — when True, numpad keys pass through to the active window instead of being intercepted (used when dialogs are open so numpad can type numbers). **Win32 API type safety:** All Win32 functions (`SetWindowsHookExW`, `UnhookWindowsHookEx`, `SetTimer`, `KillTimer`, `GetModuleHandleW`) have explicit `argtypes`/`restype` declarations for 64-bit correctness — without these, ctypes defaults to `c_int` (32-bit) which truncates `HHOOK`/`UINT_PTR` handles on x64, causing silent failures. Uses `GetModuleHandleW(None)` for the `hMod` parameter. **Hook reliability:** A single `SetTimer` (50ms) drives `_on_tick()` which polls `GetKeyState(VK_NUMLOCK)` every tick and reinstalls the hook every ~1 second (20 ticks) via `_reinstall_hook()`, guarding against Windows silently removing the hook when the Python GIL delays the callback beyond `LowLevelHooksTimeout` (~300ms). `_last_numlock_state` tracks the last known state to prevent duplicate emissions.
+   - `GlobalHotkeyService(QObject)` — registers system-wide hotkey via Win32 `RegisterHotKey` API + `QAbstractNativeEventFilter` to catch `WM_HOTKEY` messages. Parses keyboard-library-style hotkey strings (e.g. `"ctrl+\`"`) into `MOD_xxx` + `VK_xxx`. Emits `triggered` signal connected to `MainWindow.toggle_visibility`. Supports live rebinding via `update_hotkey()`. Does NOT install any `WH_KEYBOARD_LL` hook (previous `keyboard` library approach was replaced to avoid hook conflicts with `InputDetector`).
+   - `InputDetector` — launches `numpad_hook.dll` in a separate `rundll32.exe` process and communicates via named shared memory (`Local\SteamDeckSoft_NumpadHook`). Polls events from a lock-free ring buffer via `QTimer` at 16ms (~60Hz). Detects Num Lock toggles and emits `numpad_signal.numlock_changed(bool)` to drive window visibility (Num Lock ON → hide, OFF → show). Numpad scan codes 71–73/75–77/79–81 map to grid positions `(row, col)` in the 3x3 area; scan 82 (Numpad 0 = Insert when Num Lock OFF) emits `numpad_signal.back_pressed` → `MainWindow.navigate_back()`. Static method `is_numlock_on()` checks current state at startup. Has `_passthrough` flag toggled via `set_passthrough(bool)` — when True, numpad keys pass through (used when dialogs are open). Passes `os.getpid()` to rundll32 so the DLL auto-exits if the parent process crashes.
 
 4. **UI** (`src/ui/`) — Frameless `MainWindow` with custom `TitleBar` (defined in `main_window.py`, provides drag support + folder tree toggle button + opacity slider + tray button + right-click context menu with Settings / Export Config / Import Config). TitleBar height is 55px with top-aligned layout. Window supports 8-direction edge drag resize (`_Edge` IntFlag + `_EDGE_CURSORS` mapping, 6px margin detection). Layout: `QVBoxLayout(TitleBar + QSplitter(FolderTreeWidget | GridContainer))`. `FolderTreeWidget` (in `folder_tree.py`) is a `QTreeWidget` showing the recursive folder structure with drag-and-drop reordering and right-click context menu (New Sub-Folder / Rename / Edit / Delete). `QGridLayout` of `DeckButton` widgets with unified black background (`#0a0a0a`). `DeckButton` overrides `paintEvent` when an icon is set: draws button background → icon (full opacity, centered) → label text on top, applying per-button `label_color` and `label_size`. Font size priority: per-button `label_size` > 0 → use that value; otherwise → `AppSettings.default_label_size`. Buttons are right-click editable via `ButtonEditorDialog` (uses `QStackedWidget` per action type; includes `HotkeyRecorderWidget` for keyboard capture with `grabKeyboard()`, color picker for label color, font size spin box); button context menu also supports Copy/Paste to duplicate button configs across positions. All dialog `.exec()` calls are wrapped with `set_numpad_passthrough(True/False)` to allow numpad input while editing. Folders managed via `FolderEditorDialog`. Settings via `SettingsDialog` (button size/spacing/default font size, behavior, appearance — grid rows/cols hidden from UI). `TrayIcon` provides show/settings/reset position/quit context menu and double-click to show.
 
 5. **Styles** (`src/ui/styles.py`) — Pure black/charcoal theme: background `#0e0e0e`, buttons `#0a0a0a`, title bar `#080808`, borders `#1a1a1a`–`#2a2a2a`, accent `#e94560`. Exports `DARK_THEME`, `DECK_BUTTON_STYLE` (static black, base font-size 15px), `DECK_BUTTON_EMPTY_STYLE`, `MONITOR_BUTTON_STYLE`, `FOLDER_TREE_STYLE`, `TITLE_BAR_STYLE`.
+
+6. **Native Hook** (`src/native/`) — C DLL (`numpad_hook.dll`) that implements `WH_KEYBOARD_LL` keyboard hook in a separate process for reliable key suppression.
+
+   **Why a separate process?** Two constraints forced this architecture:
+   - **PyInstaller exe cannot suppress keyboard hooks.** When `WH_KEYBOARD_LL` hook callback returns 1 (suppress) from a PyInstaller-bundled exe, Windows ignores the suppression — the hook fires and sees the key, but the key still reaches the target app (e.g. VSCode). The same code works perfectly from `python.exe` (signed/trusted). This appears to be a Windows security/trust issue with unsigned executables.
+   - **Corporate security software deletes new `.exe` files** compiled with MinGW/gcc, but leaves `.dll` files alone.
+
+   **Solution:** `rundll32.exe` (trusted Windows system binary) hosts the DLL. Python launches `rundll32.exe "path\numpad_hook.dll",start_entry <parent_pid>`. The DLL's `start_entry` function starts the hook thread, creates shared memory, and blocks until either Python sets `running=0` or the parent process (identified by PID) dies.
+
+   **Architecture:**
+   - `numpad_hook.dll` — hook callback (`hook_proc`) + shared memory IPC + `start_entry` for rundll32
+   - `SharedData` struct (packed, matches Python `_SharedData` in `input_detector.py`): lock-free ring buffer (`ev_write`/`ev_read`/`events[256]`), Num Lock state (`nl_changed`/`nl_new_state`/`numlock_off`), control flags (`passthrough`/`running`), debug counters (`any_key_count`/`suppressed`/`numpad_seen`/`hook_ok`)
+   - Shared memory name: `Local\SteamDeckSoft_NumpadHook`
+   - Hook suppresses numpad nav keys (scan 71–73, 75–77, 79–82) when `numlock_off=1` and `passthrough=0`, writing scan codes to the ring buffer
+   - The hook thread uses `SetTimer` (200ms) to check the `running` flag and `PostQuitMessage` when it's 0
+   - Compile: `gcc -shared -O2 -o numpad_hook.dll numpad_hook.c -luser32 -lkernel32` (requires MSYS2 MinGW64, `PATH` must include `/c/msys64/mingw64/bin:/c/msys64/usr/bin`)
 
 **Key data flow:** Config defines a root folder tree → each folder has `buttons` and `children` (sub-folders) → the grid shows the current folder's buttons → each button has an `ActionConfig(type, params)` → on click, `ActionRegistry.execute(type, params)` dispatches to the matching `ActionBase` subclass → services feed live data back to the UI via Qt signals. The folder tree panel allows navigation between folders; clicking a folder loads its buttons into the grid. Buttons can be copied/pasted via `DeckButton._clipboard` (class-level dict storing `ButtonConfig.to_dict()` data).
 
@@ -69,7 +85,7 @@ Dependencies: `pip install -r requirements.txt` (requires Windows — uses pywin
 
 ```
 main.py                          # Entry point — Win32 Named Mutex single-instance check before any imports
-src/app.py                       # SteamDeckSoftApp — orchestrates everything
+src/app.py                       # SteamDeckSoftApp — orchestrates everything (keyboard listener monkey-patched to prevent hook conflicts)
 src/config/models.py             # Dataclasses: AppConfig, AppSettings, FolderConfig, ButtonConfig, ActionConfig (+ deprecated PageConfig for migration)
 src/config/manager.py            # ConfigManager — load/save with atomic writes + folder CRUD + export/import
 src/actions/base.py              # ActionBase ABC
@@ -84,8 +100,11 @@ src/actions/open_url.py          # OpenUrlAction — os.startfile() (Windows she
 src/services/system_stats.py     # SystemStatsService(QThread) — CPU/RAM polling
 src/services/window_monitor.py   # ActiveWindowMonitor(QThread) — foreground window tracking
 src/services/media_control.py    # MediaControlService — pycaw IAudioEndpointVolume wrapper
-src/services/global_hotkey.py    # GlobalHotkeyService(QObject) — system-wide hotkey + periodic hook refresh (QTimer 5s)
-src/services/input_detector.py   # InputDetector — Win32 keyboard hook (64-bit safe argtypes) + single 50ms timer (_on_tick: Num Lock poll + ~1s hook reinstall)
+src/services/global_hotkey.py    # GlobalHotkeyService(QObject) — Win32 RegisterHotKey + QAbstractNativeEventFilter (no WH_KEYBOARD_LL hook)
+src/services/input_detector.py   # InputDetector — launches rundll32+numpad_hook.dll, polls shared memory via QTimer (16ms)
+src/native/numpad_hook.c         # C DLL source — WH_KEYBOARD_LL hook + shared memory IPC + rundll32 entry point
+src/native/numpad_hook.dll       # Compiled DLL (bundled into exe via PyInstaller --add-binary)
+src/native/numpad_hook_console.c # Console debug version of the hook (standalone, not used in production)
 src/ui/main_window.py           # MainWindow + TitleBar — frameless resizable window, QSplitter(tree|grid), opacity slider, position persistence
 src/ui/button_widget.py         # DeckButton(QPushButton) — black buttons, custom paintEvent (icon behind text), context menu (edit/clear/copy/paste)
 src/ui/folder_tree.py           # FolderTreeWidget(QTreeWidget) — left panel folder tree with drag-and-drop
@@ -95,7 +114,7 @@ src/ui/settings_dialog.py       # SettingsDialog — grid/behavior/appearance se
 src/ui/splash.py                # Splash — startup splash screen (auto-close, 320x160, black + accent gradient)
 src/ui/styles.py                # All style constants
 src/ui/tray_icon.py             # TrayIcon(QSystemTrayIcon) — system tray with context menu (show/settings/reset position/quit)
-build.bat                        # PyInstaller build script → dist/SteamDeckSoft.exe
+build.bat                        # PyInstaller build script → dist/SteamDeckSoft.exe (bundles numpad_hook.dll via --add-binary)
 config/default_config.json       # Default 3x3 grid: Root(media+monitor) → Apps(system utils) → Shortcuts(hotkeys) (v2 format)
 USAGE.md                         # User manual — reference (Korean)
 GUIDE.md                         # User manual — beginner-friendly guide (Korean)

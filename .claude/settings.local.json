@@ -6,7 +6,19 @@
       "Bash(python:*)",
       "Bash(pip install:*)",
       "Bash(find:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "Bash(echo NO_COMPILER_FOUND:*)",
+      "Bash(winget search:*)",
+      "Bash(cmd:*)",
+      "Bash(winget install:*)",
+      "Bash(C:/msys64/usr/bin/bash.exe:*)",
+      "Bash(C:/msys64/mingw64/bin/gcc.exe:*)",
+      "Bash(cd /d/Project/SteamDeckSoft/src/native && /c/msys64/mingw64/bin/gcc.exe -shared -O2 -o numpad_hook.dll numpad_hook.c -luser32 -lkernel32 2>&1)",
+      "Bash(/c/msys64/mingw64/bin/gcc.exe:*)",
+      "Bash(echo EXIT=$?:*)",
+      "Bash(echo EXIT_CODE=$?:*)",
+      "Bash(taskkill:*)",
+      "Bash(echo EXE OK:*)"
     ]
   }
 }

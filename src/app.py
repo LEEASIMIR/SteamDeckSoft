@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
+
+# Prevent the keyboard library from ever installing a WH_KEYBOARD_LL hook.
+# Its hook interferes with our numpad_hook.exe even in a separate process.
+import keyboard as _kb
+_kb._listener.start_if_necessary = lambda: None
 
 from PyQt6.QtWidgets import QApplication
 
@@ -15,6 +21,7 @@ from .actions.navigate import NavigateFolderAction
 from .actions.text_input import TextInputAction
 from .actions.macro import MacroAction
 from .actions.open_url import OpenUrlAction
+from .actions.run_command import RunCommandAction
 from .services.media_control import MediaControlService
 from .services.system_stats import SystemStatsService
 from .services.window_monitor import ActiveWindowMonitor
@@ -86,10 +93,27 @@ class SteamDeckSoftApp(QApplication):
 
     def _setup_logging(self) -> None:
         log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        handlers: list[logging.Handler] = []
+
+        # File log — always works, even in --windowed exe (no stdout)
+        log_dir = os.path.join(
+            os.environ.get("APPDATA", "."), "SteamDeckSoft"
+        )
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.FileHandler(
+            os.path.join(log_dir, "app.log"), encoding="utf-8"
+        )
+        file_handler.setFormatter(logging.Formatter(log_format))
+        handlers.append(file_handler)
+
+        # Console log — only when stdout exists (not --windowed exe)
+        if sys.stdout is not None:
+            handlers.append(logging.StreamHandler(sys.stdout))
+
         logging.basicConfig(
             level=logging.INFO,
             format=log_format,
-            handlers=[logging.StreamHandler(sys.stdout)],
+            handlers=handlers,
         )
 
     def _register_actions(self) -> None:
@@ -108,6 +132,7 @@ class SteamDeckSoftApp(QApplication):
 
         self._action_registry.register("system_monitor", SystemMonitorAction())
         self._action_registry.register("open_url", OpenUrlAction())
+        self._action_registry.register("run_command", RunCommandAction())
 
         nav_action = NavigateFolderAction(self._action_registry)
         self._action_registry.register("navigate_folder", nav_action)

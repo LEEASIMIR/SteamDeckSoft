@@ -192,6 +192,7 @@ ACTION_TYPES = [
     ("navigate_folder", "Navigate Folder"),
     ("open_url", "Open URL"),
     ("macro", "Macro"),
+    ("run_command", "Run Command"),
 ]
 
 MACRO_STEP_TYPES = [
@@ -440,6 +441,20 @@ class ButtonEditorDialog(QDialog):
         self._macro_loading = False
         self._params_stack.addWidget(macro_page)
 
+        # Run command page
+        run_cmd_page = QWidget()
+        run_cmd_form = QFormLayout(run_cmd_page)
+        self._cmd_edit = QLineEdit()
+        self._cmd_edit.setPlaceholderText("e.g. ping google.com")
+        run_cmd_form.addRow("Command:", self._cmd_edit)
+        self._cmd_workdir_edit = QLineEdit()
+        self._cmd_workdir_edit.setPlaceholderText("(optional)")
+        run_cmd_form.addRow("Working Dir:", self._cmd_workdir_edit)
+        self._cmd_show_window_check = QCheckBox("Show console window")
+        self._cmd_show_window_check.setChecked(True)
+        run_cmd_form.addRow(self._cmd_show_window_check)
+        self._params_stack.addWidget(run_cmd_page)
+
         action_layout.addWidget(self._params_stack)
         layout.addWidget(action_group)
 
@@ -507,6 +522,10 @@ class ButtonEditorDialog(QDialog):
         elif orig_type == "macro":
             self._macro_steps = [dict(s) for s in params.get("steps", [])]
             self._macro_refresh_list()
+        elif orig_type == "run_command":
+            self._cmd_edit.setText(params.get("command", ""))
+            self._cmd_workdir_edit.setText(params.get("working_dir", ""))
+            self._cmd_show_window_check.setChecked(params.get("show_window", True))
 
     def _on_type_changed(self, index: int) -> None:
         action_type = self._type_combo.itemData(index)
@@ -520,6 +539,7 @@ class ButtonEditorDialog(QDialog):
             "navigate_folder": 6,
             "open_url": 7,
             "macro": 8,
+            "run_command": 9,
         }
         self._params_stack.setCurrentIndex(type_to_page.get(action_type, 0))
 
@@ -575,6 +595,11 @@ class ButtonEditorDialog(QDialog):
             params["folder_id"] = self._folder_combo.currentData() or ""
         elif action_type == "macro":
             params["steps"] = [dict(s) for s in self._macro_steps]
+        elif action_type == "run_command":
+            params["command"] = self._cmd_edit.text()
+            if self._cmd_workdir_edit.text():
+                params["working_dir"] = self._cmd_workdir_edit.text()
+            params["show_window"] = self._cmd_show_window_check.isChecked()
 
         return ButtonConfig(
             position=(self._row, self._col),
