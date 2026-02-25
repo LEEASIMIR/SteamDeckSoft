@@ -46,6 +46,11 @@ class SettingsDialog(QDialog):
         self._spacing_spin.setSuffix(" px")
         grid_form.addRow("Button Spacing:", self._spacing_spin)
 
+        self._default_label_size_spin = QSpinBox()
+        self._default_label_size_spin.setRange(8, 48)
+        self._default_label_size_spin.setSuffix(" px")
+        grid_form.addRow("Default Font Size:", self._default_label_size_spin)
+
         layout.addWidget(grid_group)
 
         # Behavior
@@ -94,6 +99,7 @@ class SettingsDialog(QDialog):
         s = self._config_manager.settings
         self._size_spin.setValue(s.button_size)
         self._spacing_spin.setValue(s.button_spacing)
+        self._default_label_size_spin.setValue(s.default_label_size)
         self._auto_switch_check.setChecked(s.auto_switch_enabled)
         self._always_on_top_check.setChecked(s.always_on_top)
 
@@ -110,6 +116,7 @@ class SettingsDialog(QDialog):
         s = self._config_manager.settings
         s.button_size = self._size_spin.value()
         s.button_spacing = self._spacing_spin.value()
+        s.default_label_size = self._default_label_size_spin.value()
         s.auto_switch_enabled = self._auto_switch_check.isChecked()
         s.always_on_top = self._always_on_top_check.isChecked()
         s.theme = self._theme_combo.currentData()

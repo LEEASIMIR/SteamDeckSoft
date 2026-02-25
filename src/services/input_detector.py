@@ -20,8 +20,11 @@ WM_TIMER = 0x0113
 VK_NUMLOCK = 0x90
 
 user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
 
-# Set correct arg/res types for CallNextHookEx (64-bit safe)
+# ---------- Win32 API type declarations (64-bit safe) ----------
+
+# CallNextHookEx
 user32.CallNextHookEx.argtypes = [
     ctypes.wintypes.HHOOK,
     ctypes.c_int,
@@ -29,6 +32,44 @@ user32.CallNextHookEx.argtypes = [
     ctypes.wintypes.LPARAM,
 ]
 user32.CallNextHookEx.restype = ctypes.wintypes.LPARAM
+
+# SetWindowsHookExW — returns HHOOK (pointer-sized, 64-bit on x64)
+user32.SetWindowsHookExW.argtypes = [
+    ctypes.c_int,             # idHook
+    ctypes.c_void_p,          # lpfn (HOOKPROC)
+    ctypes.wintypes.HINSTANCE,  # hMod
+    ctypes.wintypes.DWORD,    # dwThreadId
+]
+user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
+
+# UnhookWindowsHookEx
+user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HHOOK]
+user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
+
+# UINT_PTR: pointer-sized unsigned integer (64-bit on x64)
+UINT_PTR = ctypes.c_uint64 if ctypes.sizeof(ctypes.c_void_p) == 8 else ctypes.c_uint
+
+# SetTimer — returns UINT_PTR (64-bit on x64); without this, the
+# default c_int (32-bit) truncates the timer ID, making it impossible
+# to match against WM_TIMER wParam and the rehook timer never fires.
+user32.SetTimer.argtypes = [
+    ctypes.wintypes.HWND,
+    UINT_PTR,
+    ctypes.wintypes.UINT,
+    ctypes.c_void_p,          # TIMERPROC (NULL for WM_TIMER)
+]
+user32.SetTimer.restype = UINT_PTR
+
+# KillTimer
+user32.KillTimer.argtypes = [ctypes.wintypes.HWND, UINT_PTR]
+user32.KillTimer.restype = ctypes.wintypes.BOOL
+
+# GetModuleHandleW
+kernel32.GetModuleHandleW.argtypes = [ctypes.wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = ctypes.wintypes.HMODULE
+
+# Module handle of current process — needed for SetWindowsHookExW
+_hmod = kernel32.GetModuleHandleW(None)
 
 # HOOKPROC: must use LPARAM (pointer-sized) for return and lParam
 HOOKPROC = ctypes.CFUNCTYPE(
@@ -73,17 +114,20 @@ class InputDetector:
         0x22: (2, 2),  # VK_NEXT   → numpad 3
     }
 
-    _REHOOK_INTERVAL_MS = 5000  # Reinstall hook every 5 seconds
+    _POLL_MS = 50  # Single timer interval for polling + hook health
+    _REHOOK_TICKS = 20  # Reinstall hook every 20 ticks (= ~1 second)
 
     def __init__(self) -> None:
         self._last_injected = False
         self._hook = None
         self._timer_id = 0
+        self._tick_count = 0
         self._thread: threading.Thread | None = None
         self._running = False
         self._passthrough = False
         self._proc = HOOKPROC(self._hook_proc)
         self.numpad_signal = _NumpadSignal()
+        self._last_numlock_state: bool | None = None
 
     def set_passthrough(self, value: bool) -> None:
         """When True, numpad keys pass through to the active window (for dialogs)."""
@@ -144,6 +188,7 @@ class InputDetector:
                 if kb.vkCode == VK_NUMLOCK:
                     # Hook fires before state flips, so invert current state
                     will_be_on = not bool(user32.GetKeyState(VK_NUMLOCK) & 1)
+                    self._last_numlock_state = will_be_on
                     self.numpad_signal.numlock_changed.emit(will_be_on)
 
                 if not self._passthrough:
@@ -167,6 +212,20 @@ class InputDetector:
 
         return user32.CallNextHookEx(self._hook, nCode, wParam, lParam)
 
+    def _on_tick(self) -> None:
+        """Called every 50ms: poll Num Lock + periodically reinstall hook."""
+        # Always poll Num Lock state (catches missed hook events)
+        current = bool(user32.GetKeyState(VK_NUMLOCK) & 1)
+        if current != self._last_numlock_state:
+            self._last_numlock_state = current
+            self.numpad_signal.numlock_changed.emit(current)
+
+        # Reinstall hook every ~1 second (20 ticks × 50ms)
+        self._tick_count += 1
+        if self._tick_count >= self._REHOOK_TICKS:
+            self._tick_count = 0
+            self._reinstall_hook()
+
     def _reinstall_hook(self) -> None:
         """Reinstall keyboard hook to recover from silent removal by Windows.
 
@@ -178,30 +237,38 @@ class InputDetector:
         if self._hook:
             user32.UnhookWindowsHookEx(self._hook)
         self._hook = user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._proc, None, 0
+            WH_KEYBOARD_LL, self._proc, _hmod, 0
         )
         if not self._hook:
             logger.warning("Failed to reinstall keyboard hook")
+        else:
+            logger.debug("Keyboard hook reinstalled successfully")
 
     def _run(self) -> None:
         self._hook = user32.SetWindowsHookExW(
-            WH_KEYBOARD_LL, self._proc, None, 0
+            WH_KEYBOARD_LL, self._proc, _hmod, 0
         )
         if not self._hook:
             logger.error("Failed to install keyboard hook")
             return
         logger.info("InputDetector hook installed")
 
-        # Periodic timer to guard against Windows silently removing the hook
-        self._timer_id = user32.SetTimer(None, 0, self._REHOOK_INTERVAL_MS, None)
+        # Initialize last known Num Lock state
+        self._last_numlock_state = bool(user32.GetKeyState(VK_NUMLOCK) & 1)
+
+        # Single 50ms timer handles both Num Lock polling and periodic hook reinstall
+        self._timer_id = int(user32.SetTimer(None, 0, self._POLL_MS, None))
+        self._tick_count = 0
+
+        logger.info("InputDetector timer started (id=%s, interval=%dms)", self._timer_id, self._POLL_MS)
 
         msg = ctypes.wintypes.MSG()
         while self._running:
             ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
             if ret <= 0:
                 break
-            if msg.message == WM_TIMER:
-                self._reinstall_hook()
+            if msg.message == WM_TIMER and int(msg.wParam) == self._timer_id:
+                self._on_tick()
                 continue
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))

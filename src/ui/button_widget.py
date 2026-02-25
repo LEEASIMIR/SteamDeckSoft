@@ -67,6 +67,10 @@ class DeckButton(QPushButton):
             overrides.append(f"color: {self._config.label_color};")
         if self._config.label_size:
             overrides.append(f"font-size: {self._config.label_size}px;")
+        else:
+            default_size = self._main_window._config_manager.settings.default_label_size
+            if default_size != 15:
+                overrides.append(f"font-size: {default_size}px;")
         if overrides:
             style += "\nQPushButton#deckButton { " + " ".join(overrides) + " }"
         self.setStyleSheet(style)
@@ -132,7 +136,11 @@ class DeckButton(QPushButton):
             )
             painter.setPen(QColor(label_color))
             font = self.font()
-            font.setPixelSize(self._config.label_size if self._config and self._config.label_size else 15)
+            if self._config and self._config.label_size:
+                font_size = self._config.label_size
+            else:
+                font_size = self._main_window._config_manager.settings.default_label_size
+            font.setPixelSize(font_size)
             painter.setFont(font)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
 

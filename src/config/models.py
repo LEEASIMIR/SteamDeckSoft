@@ -110,6 +110,7 @@ class AppSettings:
     grid_cols: int = 5
     button_size: int = 100
     button_spacing: int = 8
+    default_label_size: int = 15
     auto_switch_enabled: bool = True
     always_on_top: bool = True
     theme: str = "dark"
@@ -125,6 +126,7 @@ class AppSettings:
             "grid_cols": self.grid_cols,
             "button_size": self.button_size,
             "button_spacing": self.button_spacing,
+            "default_label_size": self.default_label_size,
             "auto_switch_enabled": self.auto_switch_enabled,
             "always_on_top": self.always_on_top,
             "theme": self.theme,
@@ -142,6 +144,7 @@ class AppSettings:
             grid_cols=data.get("grid_cols", 5),
             button_size=data.get("button_size", 100),
             button_spacing=data.get("button_spacing", 8),
+            default_label_size=data.get("default_label_size", 15),
             auto_switch_enabled=data.get("auto_switch_enabled", True),
             always_on_top=data.get("always_on_top", True),
             theme=data.get("theme", "dark"),
