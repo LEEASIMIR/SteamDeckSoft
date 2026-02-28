@@ -74,6 +74,9 @@ class SettingsDialog(QDialog):
         self._always_on_top_check = QCheckBox("Always on top")
         behavior_form.addRow(self._always_on_top_check)
 
+        self._autostart_check = QCheckBox("Start on Windows boot (Windows 시작 시 자동 실행)")
+        behavior_form.addRow(self._autostart_check)
+
         layout.addWidget(behavior_group)
 
         # Appearance
@@ -121,6 +124,9 @@ class SettingsDialog(QDialog):
         self._auto_switch_check.setChecked(s.auto_switch_enabled)
         self._always_on_top_check.setChecked(s.always_on_top)
 
+        from ..autostart import is_autostart_enabled
+        self._autostart_check.setChecked(is_autostart_enabled())
+
         for i in range(self._theme_combo.count()):
             if self._theme_combo.itemData(i) == s.theme:
                 self._theme_combo.setCurrentIndex(i)
@@ -141,6 +147,12 @@ class SettingsDialog(QDialog):
         s.always_on_top = self._always_on_top_check.isChecked()
         s.theme = self._theme_combo.currentData()
         s.window_opacity = self._opacity_slider.value() / 100.0
+
+        autostart_desired = self._autostart_check.isChecked()
+        if autostart_desired != s.autostart_enabled:
+            from ..autostart import set_autostart
+            set_autostart(autostart_desired)
+            s.autostart_enabled = autostart_desired
 
         self._config_manager.save()
         self.accept()

@@ -19,69 +19,79 @@
     "buttons": [
       {
         "position": [0, 0],
-        "label": "VOL -",
+        "label": "🔉",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
             "command": "volume_down"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [0, 1],
-        "label": "MUTE",
+        "label": "",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
-            "command": "mute"
+            "command": "mute",
+            "mute_label": "🔇",
+            "unmute_label": "🔈"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [0, 2],
-        "label": "VOL +",
+        "label": "🔊",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
             "command": "volume_up"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [1, 0],
-        "label": "PREV",
+        "label": "⏮️",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
             "command": "prev_track"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [1, 1],
-        "label": "PLAY",
+        "label": "",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
-            "command": "play_pause"
+            "command": "play_pause",
+            "play_label": "▶️",
+            "pause_label": "⏸️"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [1, 2],
-        "label": "NEXT",
+        "label": "⏭️",
         "icon": "",
         "action": {
           "type": "media_control",
           "params": {
             "command": "next_track"
           }
-        }
+        },
+        "label_size": 30
       },
       {
         "position": [2, 0],

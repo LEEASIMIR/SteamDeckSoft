@@ -123,6 +123,7 @@ class AppSettings:
     window_x: int | None = None
     window_y: int | None = None
     default_label_family: str = ""
+    autostart_enabled: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -140,6 +141,7 @@ class AppSettings:
             "folder_tree_visible": self.folder_tree_visible,
             "window_x": self.window_x,
             "window_y": self.window_y,
+            "autostart_enabled": self.autostart_enabled,
         }
 
     @classmethod
@@ -159,6 +161,7 @@ class AppSettings:
             folder_tree_visible=data.get("folder_tree_visible", True),
             window_x=data.get("window_x"),
             window_y=data.get("window_y"),
+            autostart_enabled=data.get("autostart_enabled", False),
         )
 
 
