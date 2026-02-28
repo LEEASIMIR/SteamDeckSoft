@@ -20,7 +20,16 @@
       "Bash(taskkill:*)",
       "Bash(echo EXE OK:*)",
       "Bash(cd:*)",
-      "Bash(cmd.exe:*)"
+      "Bash(cmd.exe:*)",
+      "Bash(ls:*)",
+      "Bash(where gcc:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(/c/msys64/usr/bin/pacman.exe:*)",
+      "Bash(echo:*)",
+      "Bash(PATH=\"/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH\" /c/msys64/mingw64/bin/gcc.exe:*)",
+      "Bash(pip:*)",
+      "Bash(PATH=\"/c/msys64/mingw64/bin:/c/msys64/usr/bin:$PATH\" gcc:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

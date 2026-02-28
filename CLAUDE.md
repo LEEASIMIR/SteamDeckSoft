@@ -8,11 +8,13 @@ SoftDeck is a Windows-only PyQt6 desktop app that acts as a configurable button 
 
 ## Running
 
-```bash
-python main.py
-```
+**With embedded Python (no install required):** Double-click `SoftDeck.bat`. On first run, it auto-downloads Python 3.13.2 embedded distribution + pip + dependencies into `python/` folder, then launches the app. Subsequent runs skip setup and launch immediately.
+
+**With system Python:** `python main.py`
 
 Dependencies: `pip install -r requirements.txt` (requires Windows — uses pywin32, pycaw, comtypes, keyboard, winrt-Windows.Media.Control, pynput).
+
+**Embedded Python setup details:** `SoftDeck.bat` checks for `python/pythonw.exe`. If missing, it downloads `python-3.13.2-embed-amd64.zip` from python.org, extracts to `python/`, enables `import site` in `python313._pth`, adds `..` (project root) to the path file, installs pip via `get-pip.py`, and runs `pip install -r requirements.txt`. The `python/` folder is gitignored.
 
 ## Architecture
 
@@ -118,6 +120,7 @@ The app relies heavily on Windows-specific APIs:
 ## File Map
 
 ```
+SoftDeck.bat                     # All-in-one launcher — auto-setup embedded Python on first run, then launch app via pythonw.exe
 main.py                          # Entry point — Win32 Named Mutex single-instance check before any imports
 src/version.py                   # APP_VERSION constant ("0.1.1")
 src/app.py                       # SoftDeckApp — orchestrates everything (keyboard listener monkey-patched to prevent hook conflicts), apply_input_mode() for live shortcut↔widget switching
@@ -167,6 +170,7 @@ config/default_config.json       # Default grid (4 rows): Root(media+monitor) �
 config/examples/media.json       # Example folder: Media (emoji media controls, mute/play toggle labels, audio device switch, now playing, mic mute)
 config/examples/folders.json     # Example folder: 폴더 (open_folder for Pictures/Documents/Downloads/Desktop via %USERPROFILE%)
 config/examples/virtual_desktop.json # Example folder: 가상 데스크톱 (Windows virtual desktop hotkeys: switch/create/close/task view)
+python/                          # (gitignored, generated) Embedded Python 3.13.2 + pip + site-packages — created by SoftDeck.bat on first run
 USAGE.md                         # User manual — reference (Korean)
 GUIDE.md                         # User manual — beginner-friendly guide (Korean)
 docs/build_pdf.py                # Script to regenerate the PDF guide
