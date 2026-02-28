@@ -318,10 +318,6 @@ def build_pdf(output_path: str):
         ],
         col_widths=[40 * mm, 120 * mm],
     ))
-    story.append(sp())
-    story.append(tip_box(
-        "<b>빌드된 exe 파일 사용 시:</b> dist/SoftDeck.exe를 직접 실행하면 됩니다."
-    ))
 
     # =========================================================================
     # 3. 넘패드로 조작하기 (Shortcut Mode)
