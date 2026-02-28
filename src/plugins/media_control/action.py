@@ -40,6 +40,14 @@ class MediaControlAction(ActionBase):
             elif command == "mute":
                 if self._media_service:
                     self._media_service.toggle_mute()
+            elif command == "mic_mute":
+                if self._media_service:
+                    self._media_service.toggle_mic_mute()
+            elif command == "now_playing":
+                keyboard.send(self._MEDIA_KEYS["play_pause"])
+            elif command == "audio_device_switch":
+                if self._media_service:
+                    self._media_service.cycle_audio_output_device()
             elif command in self._MEDIA_KEYS:
                 keyboard.send(self._MEDIA_KEYS[command])
             else:
@@ -50,4 +58,7 @@ class MediaControlAction(ActionBase):
             logger.exception("Failed media control: %s", command)
 
     def get_display_text(self, params: dict[str, Any]) -> str | None:
+        command = params.get("command", "")
+        if command == "now_playing":
+            return "Now Playing"
         return None

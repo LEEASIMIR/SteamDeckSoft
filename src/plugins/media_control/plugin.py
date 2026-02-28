@@ -19,6 +19,9 @@ _MEDIA_ICON_MAP: dict[str, str] = {
     "volume_up": "volume_up",
     "volume_down": "volume_down",
     "mute": "mute",
+    "mic_mute": "mic_on",
+    "now_playing": "now_playing",
+    "audio_device_switch": "audio_device_switch",
 }
 
 
@@ -36,6 +39,7 @@ class MediaControlPlugin(PluginBase):
         self._playback_monitor: MediaPlaybackMonitor | None = None
         self._is_playing: bool = False
         self._is_muted: bool = False
+        self._is_mic_muted: bool = False
 
     def get_action_type(self) -> str:
         return "media_control"
@@ -81,6 +85,13 @@ class MediaControlPlugin(PluginBase):
                 if os.path.isfile(path):
                     return path
             filename = "mute"  # static fallback
+        elif command == "mic_mute":
+            filename = "mic_off" if self._is_mic_muted else "mic_on"
+            for ext in (".png", ".svg", ".ico"):
+                path = os.path.join(icons, filename + ext)
+                if os.path.isfile(path):
+                    return path
+            filename = "mic_on"  # static fallback
         else:
             filename = _MEDIA_ICON_MAP.get(command, "")
 

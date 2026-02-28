@@ -18,6 +18,44 @@ logger = logging.getLogger(__name__)
 _icon_provider = QFileIconProvider()
 
 
+def _crop_transparent_padding(pixmap: "QPixmap") -> "QPixmap":
+    """Crop excess transparent padding if content fills less than 50% of canvas."""
+    from PyQt6.QtGui import QImage
+
+    img = pixmap.toImage()
+    w, h = img.width(), img.height()
+    if w <= 48 or h <= 48:
+        return pixmap
+
+    min_x, min_y, max_x, max_y = w, h, 0, 0
+    for y in range(h):
+        for x in range(w):
+            if img.pixelColor(x, y).alpha() > 0:
+                if x < min_x:
+                    min_x = x
+                if x > max_x:
+                    max_x = x
+                if y < min_y:
+                    min_y = y
+                if y > max_y:
+                    max_y = y
+
+    if max_x < min_x:
+        return pixmap
+
+    content_w = max_x - min_x + 1
+    content_h = max_y - min_y + 1
+    if content_w / w >= 0.5 and content_h / h >= 0.5:
+        return pixmap
+
+    pad = max(2, min(content_w, content_h) // 8)
+    x1 = max(0, min_x - pad)
+    y1 = max(0, min_y - pad)
+    x2 = min(w, max_x + 1 + pad)
+    y2 = min(h, max_y + 1 + pad)
+    return pixmap.copy(x1, y1, x2 - x1, y2 - y1)
+
+
 @dataclass
 class AppFinderResult:
     exe_path: str
@@ -269,7 +307,10 @@ class AppFinderDialog(QDialog):
                 best = QSize(32, 32)
 
             pixmap = icon.pixmap(best)
-            if not pixmap.isNull() and pixmap.save(icon_file, "PNG"):
+            if pixmap.isNull():
+                return ""
+            pixmap = _crop_transparent_padding(pixmap)
+            if pixmap.save(icon_file, "PNG"):
                 return icon_file
         except Exception:
             logger.debug("Failed to save icon for %s", exe_path, exc_info=True)

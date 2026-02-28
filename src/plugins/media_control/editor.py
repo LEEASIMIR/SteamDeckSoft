@@ -17,12 +17,16 @@ MEDIA_COMMANDS = [
     ("volume_up", "Volume Up"),
     ("volume_down", "Volume Down"),
     ("mute", "Mute / Unmute"),
+    ("mic_mute", "Mic Mute / Unmute"),
+    ("now_playing", "Now Playing"),
+    ("audio_device_switch", "Audio Device Switch"),
 ]
 
 # Per-state toggle commands: (command, group_title, state_a_prefix, state_b_prefix)
 _TOGGLE_COMMANDS = {
     "play_pause": ("Play / Pause Settings", "Play", "Pause"),
     "mute": ("Mute / Unmute Settings", "Mute", "Unmute"),
+    "mic_mute": ("Mic Mute / Unmute Settings", "Mic On", "Mic Off"),
 }
 
 
@@ -106,6 +110,7 @@ class MediaControlEditorWidget(PluginEditorWidget):
     _PARAM_KEYS = {
         "play_pause": ("play_icon", "play_label", "pause_icon", "pause_label"),
         "mute": ("mute_icon", "mute_label", "unmute_icon", "unmute_label"),
+        "mic_mute": ("mic_on_icon", "mic_on_label", "mic_off_icon", "mic_off_label"),
     }
 
     def load_params(self, params: dict[str, Any]) -> None:

@@ -24,7 +24,8 @@ class FolderTreeWidget(QTreeWidget):
         self.setObjectName("folderTree")
         self.setStyleSheet(self._main_window._theme.folder_tree_style)
         self.setHeaderLabel("Folders")
-        self.setMinimumWidth(160)
+        self.setIndentation(12)
+        self.setMinimumWidth(120)
         self.setMaximumWidth(300)
 
         # Drag and drop
@@ -130,7 +131,26 @@ class FolderTreeWidget(QTreeWidget):
         if not is_root:
             rename_action = menu.addAction("Rename")
         edit_action = menu.addAction("Edit (Mapped Apps)")
+
+        menu.addSeparator()
+        export_action = menu.addAction("Export Folder")
+        import_action = menu.addAction("Import Folder")
+
+        move_up_action = None
+        move_down_action = None
         if not is_root:
+            menu.addSeparator()
+            move_up_action = menu.addAction("Move Up")
+            move_down_action = menu.addAction("Move Down")
+
+            parent = self._config_manager.find_parent_folder(folder_id)
+            if parent is not None:
+                idx = next((i for i, c in enumerate(parent.children) if c.id == folder_id), -1)
+                if idx <= 0:
+                    move_up_action.setEnabled(False)
+                if idx < 0 or idx >= len(parent.children) - 1:
+                    move_down_action.setEnabled(False)
+
             menu.addSeparator()
             delete_action = menu.addAction("Delete")
 
@@ -144,6 +164,14 @@ class FolderTreeWidget(QTreeWidget):
             self._rename_folder(folder_id)
         elif action == edit_action:
             self._edit_folder(folder_id)
+        elif action == export_action:
+            self._export_folder(folder_id)
+        elif action == import_action:
+            self._import_folder(folder_id)
+        elif action == move_up_action:
+            self._move_folder_up(folder_id)
+        elif action == move_down_action:
+            self._move_folder_down(folder_id)
         elif action == delete_action:
             self._delete_folder(folder_id)
 
@@ -188,6 +216,77 @@ class FolderTreeWidget(QTreeWidget):
             folder.name = updated.name
             folder.mapped_apps = updated.mapped_apps
             self._config_manager.save()
+            self.rebuild()
+            self.select_folder_by_id(folder_id)
+
+    def _export_folder(self, folder_id: str) -> None:
+        folder = self._config_manager.get_folder_by_id(folder_id)
+        if folder is None:
+            return
+        from pathlib import Path
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        # Sanitize folder name for default filename
+        safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in folder.name).strip()
+        default_name = f"{safe_name}.json" if safe_name else "folder.json"
+
+        self._set_passthrough(True)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Folder", default_name, "JSON Files (*.json)"
+        )
+        self._set_passthrough(False)
+        if not path:
+            return
+        try:
+            self._config_manager.export_folder(folder_id, Path(path))
+            QMessageBox.information(self, "Export", f"Folder '{folder.name}' exported successfully.")
+        except Exception as e:
+            logger.exception("Failed to export folder")
+            QMessageBox.warning(self, "Export Error", str(e))
+
+    def _import_folder(self, parent_id: str) -> None:
+        from pathlib import Path
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+        self._set_passthrough(True)
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Folder", "", "JSON Files (*.json)"
+        )
+        self._set_passthrough(False)
+        if not path:
+            return
+        try:
+            new_folder = self._config_manager.import_folder(parent_id, Path(path))
+            self.rebuild()
+            self.select_folder_by_id(new_folder.id)
+            self.folder_selected.emit(new_folder.id)
+        except Exception as e:
+            logger.exception("Failed to import folder")
+            QMessageBox.warning(self, "Import Error", str(e))
+
+    def _move_folder_up(self, folder_id: str) -> None:
+        parent = self._config_manager.find_parent_folder(folder_id)
+        if parent is None:
+            return
+        idx = next((i for i, c in enumerate(parent.children) if c.id == folder_id), -1)
+        if idx <= 0:
+            return
+        # move_folder removes first then inserts, so target index is idx - 1
+        if self._config_manager.move_folder(folder_id, parent.id, idx - 1):
+            self.rebuild()
+            self.select_folder_by_id(folder_id)
+
+    def _move_folder_down(self, folder_id: str) -> None:
+        parent = self._config_manager.find_parent_folder(folder_id)
+        if parent is None:
+            return
+        idx = next((i for i, c in enumerate(parent.children) if c.id == folder_id), -1)
+        if idx < 0 or idx >= len(parent.children) - 1:
+            return
+        # move_folder removes first (shifting indices down), then inserts at position
+        # To move one position down: after removal, the item at idx+1 shifts to idx,
+        # so we insert at idx+1
+        if self._config_manager.move_folder(folder_id, parent.id, idx + 1):
             self.rebuild()
             self.select_folder_by_id(folder_id)
 

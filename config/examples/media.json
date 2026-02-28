@@ -1,0 +1,122 @@
+{
+  "version": "0.1.1",
+  "name_suffix": "Media",
+  "folder": {
+    "id": "example_media",
+    "name": "0.1.1_Media",
+    "mapped_apps": [],
+    "buttons": [
+      {
+        "position": [0, 0],
+        "label": "🔉",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "volume_down"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [0, 1],
+        "label": "",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "mute",
+            "mute_label": "🔇",
+            "unmute_label": "🔈"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [0, 2],
+        "label": "🔊",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "volume_up"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [1, 0],
+        "label": "⏮️",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "prev_track"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [1, 1],
+        "label": "",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "play_pause",
+            "play_label": "▶️",
+            "pause_label": "⏸️"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [1, 2],
+        "label": "⏭️",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "next_track"
+          }
+        },
+        "label_size": 30
+      },
+      {
+        "position": [2, 0],
+        "label": "",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "audio_device_switch"
+          }
+        }
+      },
+      {
+        "position": [2, 1],
+        "label": "",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "now_playing"
+          }
+        }
+      },
+      {
+        "position": [2, 2],
+        "label": "",
+        "icon": "",
+        "action": {
+          "type": "media_control",
+          "params": {
+            "command": "mic_mute"
+          }
+        }
+      }
+    ],
+    "children": [],
+    "expanded": true
+  }
+}

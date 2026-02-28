@@ -497,10 +497,12 @@ QTreeWidget#folderTree {{
     border-right: 1px solid {p.border_dark};
     outline: none;
     font-size: 12px;
+    padding: 0px;
+    margin: 0px;
 }}
 
 QTreeWidget#folderTree::item {{
-    padding: 4px 8px;
+    padding: 3px 4px 3px 2px;
     border-radius: 0px;
 }}
 
@@ -534,7 +536,7 @@ QHeaderView::section {{
     color: {p.accent};
     border: none;
     border-bottom: 1px solid {p.border_dark};
-    padding: 4px 8px;
+    padding: 4px 4px;
     font-size: 11px;
     font-weight: bold;
 }}

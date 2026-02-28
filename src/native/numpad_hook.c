@@ -56,7 +56,7 @@ static volatile int g_running  = 0;
 static int is_numpad_nav(int scan) {
     return (scan >= 71 && scan <= 73) ||
            (scan >= 75 && scan <= 77) ||
-           (scan >= 79 && scan <= 82);
+           (scan >= 79 && scan <= 83);
 }
 
 /* ---- hook callback (pure C, in DLL) ----------------------------------- */

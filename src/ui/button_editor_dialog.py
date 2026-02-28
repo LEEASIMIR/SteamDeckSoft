@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import Qt
@@ -197,15 +198,23 @@ ACTION_TYPES = [
     ("text_input", "Text Input"),
     ("system_monitor", "System Monitor"),
     ("navigate_folder", "Navigate Folder"),
+    ("navigate_parent", "Navigate to Parent"),
     ("open_url", "Open URL"),
+    ("open_folder", "Open Folder"),
     ("macro", "Macro"),
     ("run_command", "Run Command"),
+    ("_plugin", "Plugin"),
 ]
 
 MACRO_STEP_TYPES = [
     ("hotkey", "Hotkey"),
     ("text_input", "Text Input"),
     ("delay", "Delay"),
+    ("key_down", "Key Down"),
+    ("key_up", "Key Up"),
+    ("mouse_down", "Mouse Down"),
+    ("mouse_up", "Mouse Up"),
+    ("mouse_scroll", "Mouse Scroll"),
 ]
 
 
@@ -355,6 +364,12 @@ class ButtonEditorDialog(QDialog):
         navigate_form.addRow("Target Folder:", self._folder_combo)
         self._params_stack.addWidget(navigate_page)
 
+        # Navigate parent page
+        nav_parent_page = QWidget()
+        nav_parent_form = QFormLayout(nav_parent_page)
+        nav_parent_form.addRow(QLabel("Navigates back to the parent folder."))
+        self._params_stack.addWidget(nav_parent_page)
+
         # Open URL page
         url_page = QWidget()
         url_form = QFormLayout(url_page)
@@ -363,14 +378,28 @@ class ButtonEditorDialog(QDialog):
         url_form.addRow("URL:", self._url_edit)
         self._params_stack.addWidget(url_page)
 
+        # Open folder page
+        open_folder_page = QWidget()
+        open_folder_form = QFormLayout(open_folder_page)
+        self._folder_path_edit = QLineEdit()
+        self._folder_path_edit.setPlaceholderText("C:\\Users\\... or %USERPROFILE%\\...")
+        folder_path_row = QHBoxLayout()
+        folder_path_row.addWidget(self._folder_path_edit)
+        folder_browse_btn = QPushButton("Browse...")
+        folder_browse_btn.clicked.connect(self._browse_folder_path)
+        folder_path_row.addWidget(folder_browse_btn)
+        open_folder_form.addRow("Folder:", folder_path_row)
+        self._params_stack.addWidget(open_folder_page)
+
         # Macro page
         macro_page = QWidget()
         macro_layout = QVBoxLayout(macro_page)
 
         # Step list
         self._macro_step_list = QListWidget()
+        self._macro_step_list.setMinimumHeight(120)
         self._macro_step_list.currentRowChanged.connect(self._on_macro_step_selected)
-        macro_layout.addWidget(self._macro_step_list)
+        macro_layout.addWidget(self._macro_step_list, 1)
 
         # Add / Remove / Move buttons
         step_btn_row = QHBoxLayout()
@@ -392,6 +421,10 @@ class ButtonEditorDialog(QDialog):
         down_step_btn.setFixedWidth(30)
         down_step_btn.clicked.connect(self._macro_move_down)
         step_btn_row.addWidget(down_step_btn)
+        record_btn = QPushButton("Record")
+        record_btn.setToolTip("Record keyboard & mouse events (F9=Stop, Esc=Cancel)")
+        record_btn.clicked.connect(self._macro_start_recording)
+        step_btn_row.addWidget(record_btn)
         macro_layout.addLayout(step_btn_row)
 
         # Step edit area (stacked)
@@ -432,6 +465,85 @@ class ButtonEditorDialog(QDialog):
         delay_step_form.addRow("Delay:", self._macro_delay_spin)
         self._macro_edit_stack.addWidget(delay_step_w)
 
+        # key_down step editor (index 4)
+        key_down_w = QWidget()
+        key_down_form = QFormLayout(key_down_w)
+        self._macro_kd_key = QLineEdit()
+        self._macro_kd_key.setReadOnly(True)
+        key_down_form.addRow("Key:", self._macro_kd_key)
+        self._macro_kd_vk = QSpinBox()
+        self._macro_kd_vk.setRange(0, 65535)
+        self._macro_kd_vk.setReadOnly(True)
+        key_down_form.addRow("VK Code:", self._macro_kd_vk)
+        self._macro_edit_stack.addWidget(key_down_w)
+
+        # key_up step editor (index 5)
+        key_up_w = QWidget()
+        key_up_form = QFormLayout(key_up_w)
+        self._macro_ku_key = QLineEdit()
+        self._macro_ku_key.setReadOnly(True)
+        key_up_form.addRow("Key:", self._macro_ku_key)
+        self._macro_ku_vk = QSpinBox()
+        self._macro_ku_vk.setRange(0, 65535)
+        self._macro_ku_vk.setReadOnly(True)
+        key_up_form.addRow("VK Code:", self._macro_ku_vk)
+        self._macro_edit_stack.addWidget(key_up_w)
+
+        # mouse_down step editor (index 6)
+        mouse_down_w = QWidget()
+        mouse_down_form = QFormLayout(mouse_down_w)
+        self._macro_md_btn = QComboBox()
+        self._macro_md_btn.addItems(["left", "right", "middle"])
+        self._macro_md_btn.currentIndexChanged.connect(self._macro_update_current_step)
+        mouse_down_form.addRow("Button:", self._macro_md_btn)
+        self._macro_md_x = QSpinBox()
+        self._macro_md_x.setRange(-99999, 99999)
+        self._macro_md_x.valueChanged.connect(self._macro_update_current_step)
+        mouse_down_form.addRow("X:", self._macro_md_x)
+        self._macro_md_y = QSpinBox()
+        self._macro_md_y.setRange(-99999, 99999)
+        self._macro_md_y.valueChanged.connect(self._macro_update_current_step)
+        mouse_down_form.addRow("Y:", self._macro_md_y)
+        self._macro_edit_stack.addWidget(mouse_down_w)
+
+        # mouse_up step editor (index 7)
+        mouse_up_w = QWidget()
+        mouse_up_form = QFormLayout(mouse_up_w)
+        self._macro_mu_btn = QComboBox()
+        self._macro_mu_btn.addItems(["left", "right", "middle"])
+        self._macro_mu_btn.currentIndexChanged.connect(self._macro_update_current_step)
+        mouse_up_form.addRow("Button:", self._macro_mu_btn)
+        self._macro_mu_x = QSpinBox()
+        self._macro_mu_x.setRange(-99999, 99999)
+        self._macro_mu_x.valueChanged.connect(self._macro_update_current_step)
+        mouse_up_form.addRow("X:", self._macro_mu_x)
+        self._macro_mu_y = QSpinBox()
+        self._macro_mu_y.setRange(-99999, 99999)
+        self._macro_mu_y.valueChanged.connect(self._macro_update_current_step)
+        mouse_up_form.addRow("Y:", self._macro_mu_y)
+        self._macro_edit_stack.addWidget(mouse_up_w)
+
+        # mouse_scroll step editor (index 8)
+        mouse_scroll_w = QWidget()
+        mouse_scroll_form = QFormLayout(mouse_scroll_w)
+        self._macro_ms_x = QSpinBox()
+        self._macro_ms_x.setRange(-99999, 99999)
+        self._macro_ms_x.valueChanged.connect(self._macro_update_current_step)
+        mouse_scroll_form.addRow("X:", self._macro_ms_x)
+        self._macro_ms_y = QSpinBox()
+        self._macro_ms_y.setRange(-99999, 99999)
+        self._macro_ms_y.valueChanged.connect(self._macro_update_current_step)
+        mouse_scroll_form.addRow("Y:", self._macro_ms_y)
+        self._macro_ms_dx = QSpinBox()
+        self._macro_ms_dx.setRange(-99999, 99999)
+        self._macro_ms_dx.valueChanged.connect(self._macro_update_current_step)
+        mouse_scroll_form.addRow("dX:", self._macro_ms_dx)
+        self._macro_ms_dy = QSpinBox()
+        self._macro_ms_dy.setRange(-99999, 99999)
+        self._macro_ms_dy.valueChanged.connect(self._macro_update_current_step)
+        mouse_scroll_form.addRow("dY:", self._macro_ms_dy)
+        self._macro_edit_stack.addWidget(mouse_scroll_w)
+
         macro_layout.addWidget(self._macro_edit_stack)
 
         self._macro_steps: list[dict] = []
@@ -452,6 +564,24 @@ class ButtonEditorDialog(QDialog):
         run_cmd_form.addRow(self._cmd_show_window_check)
         self._params_stack.addWidget(run_cmd_page)
 
+        # Plugin page — contains plugin selector + nested editor stack
+        plugin_page = QWidget()
+        plugin_layout = QVBoxLayout(plugin_page)
+        plugin_layout.setContentsMargins(0, 0, 0, 0)
+
+        plugin_select_row = QHBoxLayout()
+        plugin_select_row.addWidget(QLabel("Plugin:"))
+        self._plugin_combo = QComboBox()
+        self._plugin_combo.currentIndexChanged.connect(self._on_plugin_changed)
+        plugin_select_row.addWidget(self._plugin_combo, 1)
+        plugin_layout.addLayout(plugin_select_row)
+
+        self._plugin_editor_stack = QStackedWidget()
+        self._plugin_editor_stack.addWidget(QWidget())  # index 0: empty
+        plugin_layout.addWidget(self._plugin_editor_stack)
+
+        self._params_stack.addWidget(plugin_page)
+
         # Build type→page index map for built-in types
         self._type_to_page = {
             "": 0,
@@ -460,24 +590,28 @@ class ButtonEditorDialog(QDialog):
             "text_input": 3,
             "system_monitor": 4,
             "navigate_folder": 5,
-            "open_url": 6,
-            "macro": 7,
-            "run_command": 8,
+            "navigate_parent": 6,
+            "open_url": 7,
+            "open_folder": 8,
+            "macro": 9,
+            "run_command": 10,
+            "_plugin": 11,
         }
 
-        # Plugin action types (dynamic pages)
+        # Register plugin editors into the plugin sub-page
+        self._plugin_type_to_editor_page: dict[str, int] = {}
         if self._plugin_loader:
             for action_type, display_name in self._plugin_loader.get_action_types():
-                self._type_combo.addItem(display_name, action_type)
+                self._plugin_combo.addItem(display_name, action_type)
                 editor = self._plugin_loader.get_editor(action_type)
                 if editor:
                     widget = editor.create_widget(self)
-                    idx = self._params_stack.addWidget(widget)
+                    idx = self._plugin_editor_stack.addWidget(widget)
                     self._plugin_editors[action_type] = editor
-                    self._type_to_page[action_type] = idx
+                    self._plugin_type_to_editor_page[action_type] = idx
                 else:
-                    idx = self._params_stack.addWidget(QWidget())
-                    self._type_to_page[action_type] = idx
+                    idx = self._plugin_editor_stack.addWidget(QWidget())
+                    self._plugin_type_to_editor_page[action_type] = idx
 
         action_layout.addWidget(self._params_stack)
         layout.addWidget(action_group)
@@ -512,10 +646,28 @@ class ButtonEditorDialog(QDialog):
         if action_type == "navigate_page":
             action_type = "navigate_folder"
 
-        for i in range(self._type_combo.count()):
-            if self._type_combo.itemData(i) == action_type:
-                self._type_combo.setCurrentIndex(i)
-                break
+        # Plugin types → select "_plugin" in main combo + specific plugin in sub-combo
+        is_plugin_type = action_type in self._plugin_editors or (
+            action_type and action_type not in self._type_to_page
+            and action_type in self._plugin_type_to_editor_page
+        )
+
+        if is_plugin_type:
+            # Select "Plugin" in main type combo
+            for i in range(self._type_combo.count()):
+                if self._type_combo.itemData(i) == "_plugin":
+                    self._type_combo.setCurrentIndex(i)
+                    break
+            # Select specific plugin in sub-combo
+            for i in range(self._plugin_combo.count()):
+                if self._plugin_combo.itemData(i) == action_type:
+                    self._plugin_combo.setCurrentIndex(i)
+                    break
+        else:
+            for i in range(self._type_combo.count()):
+                if self._type_combo.itemData(i) == action_type:
+                    self._type_combo.setCurrentIndex(i)
+                    break
 
         # Load params
         params = self._config.action.params
@@ -531,6 +683,8 @@ class ButtonEditorDialog(QDialog):
             self._text_clipboard_check.setChecked(params.get("use_clipboard", False))
         elif orig_type == "open_url":
             self._url_edit.setText(params.get("url", ""))
+        elif orig_type == "open_folder":
+            self._folder_path_edit.setText(params.get("path", ""))
         elif orig_type in ("navigate_page", "navigate_folder"):
             folder_id = params.get("folder_id", "") or params.get("page_id", "")
             for i in range(self._folder_combo.count()):
@@ -550,6 +704,13 @@ class ButtonEditorDialog(QDialog):
     def _on_type_changed(self, index: int) -> None:
         action_type = self._type_combo.itemData(index)
         self._params_stack.setCurrentIndex(self._type_to_page.get(action_type, 0))
+        if action_type == "_plugin" and self._plugin_combo.count() > 0:
+            self._on_plugin_changed(self._plugin_combo.currentIndex())
+
+    def _on_plugin_changed(self, index: int) -> None:
+        action_type = self._plugin_combo.itemData(index)
+        page = self._plugin_type_to_editor_page.get(action_type, 0) if action_type else 0
+        self._plugin_editor_stack.setCurrentIndex(page)
 
     def _browse_icon(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -571,12 +732,58 @@ class ButtonEditorDialog(QDialog):
             f"QPushButton {{ background-color: {color}; border: 1px solid #555; border-radius: 4px; }}"
         )
 
+    def _browse_folder_path(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Folder")
+        if path:
+            self._folder_path_edit.setText(path)
+
     def _browse_app(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Application", "", "Executables (*.exe);;All Files (*)"
+            self, "Select Application", "", "All Files (*);;Executables (*.exe)"
         )
         if path:
             self._app_path_edit.setText(path)
+            if not self._app_workdir_edit.text().strip():
+                self._app_workdir_edit.setText(os.path.dirname(path))
+            icon_path = self._save_app_icon(path)
+            if icon_path:
+                self._icon_edit.setText(icon_path)
+
+    @staticmethod
+    def _save_app_icon(exe_path: str) -> str:
+        """Extract the file icon and save as PNG. Returns saved path or empty."""
+        try:
+            import hashlib
+            from PyQt6.QtCore import QFileInfo, QSize
+            from PyQt6.QtWidgets import QFileIconProvider
+
+            icons_dir = os.path.join(
+                os.environ.get("APPDATA", ""), "SoftDeck", "icons",
+            )
+            os.makedirs(icons_dir, exist_ok=True)
+
+            basename = os.path.splitext(os.path.basename(exe_path))[0].lower()
+            path_hash = hashlib.md5(exe_path.lower().encode()).hexdigest()[:8]
+            icon_file = os.path.join(icons_dir, f"{basename}_{path_hash}.png")
+
+            if os.path.isfile(icon_file):
+                return icon_file
+
+            provider = QFileIconProvider()
+            icon = provider.icon(QFileInfo(exe_path))
+            sizes = icon.availableSizes()
+            best = max(sizes, key=lambda s: s.width() * s.height()) if sizes else QSize(32, 32)
+
+            pixmap = icon.pixmap(best)
+            if pixmap.isNull():
+                return ""
+            from .app_finder_dialog import _crop_transparent_padding
+            pixmap = _crop_transparent_padding(pixmap)
+            if pixmap.save(icon_file, "PNG"):
+                return icon_file
+        except Exception:
+            logger.debug("Failed to save icon for %s", exe_path, exc_info=True)
+        return ""
 
     def _find_app(self) -> None:
         from .app_finder_dialog import AppFinderDialog
@@ -594,6 +801,10 @@ class ButtonEditorDialog(QDialog):
         action_type = self._type_combo.currentData()
         params: dict = {}
 
+        # Resolve plugin meta-type to actual plugin action type
+        if action_type == "_plugin":
+            action_type = self._plugin_combo.currentData() or ""
+
         if action_type == "launch_app":
             params["path"] = self._app_path_edit.text()
             if self._app_args_edit.text():
@@ -609,6 +820,8 @@ class ButtonEditorDialog(QDialog):
             params["display"] = "cpu_ram"
         elif action_type == "open_url":
             params["url"] = self._url_edit.text()
+        elif action_type == "open_folder":
+            params["path"] = self._folder_path_edit.text()
         elif action_type == "navigate_folder":
             params["folder_id"] = self._folder_combo.currentData() or ""
         elif action_type == "macro":
@@ -645,6 +858,16 @@ class ButtonEditorDialog(QDialog):
             return f"Text: {preview}{clip}"
         if t == "delay":
             return f"Delay: {p.get('ms', 100)}ms"
+        if t == "key_down":
+            return f"\u2193 Key Down: {p.get('key', '')}"
+        if t == "key_up":
+            return f"\u2191 Key Up: {p.get('key', '')}"
+        if t == "mouse_down":
+            return f"\u25cf Mouse Down: {p.get('button', 'left')} ({p.get('x', 0)},{p.get('y', 0)})"
+        if t == "mouse_up":
+            return f"\u25cb Mouse Up: {p.get('button', 'left')} ({p.get('x', 0)},{p.get('y', 0)})"
+        if t == "mouse_scroll":
+            return f"\u2195 Scroll: ({p.get('x', 0)},{p.get('y', 0)}) d({p.get('dx', 0)},{p.get('dy', 0)})"
         return f"Unknown: {t}"
 
     def _macro_refresh_list(self) -> None:
@@ -663,6 +886,16 @@ class ButtonEditorDialog(QDialog):
             step = {"type": "hotkey", "params": {"keys": ""}}
         elif step_type == "text_input":
             step = {"type": "text_input", "params": {"text": "", "use_clipboard": False}}
+        elif step_type == "key_down":
+            step = {"type": "key_down", "params": {"key": "", "vk": 0}}
+        elif step_type == "key_up":
+            step = {"type": "key_up", "params": {"key": "", "vk": 0}}
+        elif step_type == "mouse_down":
+            step = {"type": "mouse_down", "params": {"button": "left", "x": 0, "y": 0}}
+        elif step_type == "mouse_up":
+            step = {"type": "mouse_up", "params": {"button": "left", "x": 0, "y": 0}}
+        elif step_type == "mouse_scroll":
+            step = {"type": "mouse_scroll", "params": {"x": 0, "y": 0, "dx": 0, "dy": 0}}
         else:
             step = {"type": "delay", "params": {"ms": 100}}
         self._macro_steps.append(step)
@@ -715,6 +948,30 @@ class ButtonEditorDialog(QDialog):
         elif step_type == "delay":
             self._macro_delay_spin.setValue(p.get("ms", 100))
             self._macro_edit_stack.setCurrentIndex(3)
+        elif step_type == "key_down":
+            self._macro_kd_key.setText(p.get("key", ""))
+            self._macro_kd_vk.setValue(p.get("vk", 0))
+            self._macro_edit_stack.setCurrentIndex(4)
+        elif step_type == "key_up":
+            self._macro_ku_key.setText(p.get("key", ""))
+            self._macro_ku_vk.setValue(p.get("vk", 0))
+            self._macro_edit_stack.setCurrentIndex(5)
+        elif step_type == "mouse_down":
+            self._macro_md_btn.setCurrentText(p.get("button", "left"))
+            self._macro_md_x.setValue(p.get("x", 0))
+            self._macro_md_y.setValue(p.get("y", 0))
+            self._macro_edit_stack.setCurrentIndex(6)
+        elif step_type == "mouse_up":
+            self._macro_mu_btn.setCurrentText(p.get("button", "left"))
+            self._macro_mu_x.setValue(p.get("x", 0))
+            self._macro_mu_y.setValue(p.get("y", 0))
+            self._macro_edit_stack.setCurrentIndex(7)
+        elif step_type == "mouse_scroll":
+            self._macro_ms_x.setValue(p.get("x", 0))
+            self._macro_ms_y.setValue(p.get("y", 0))
+            self._macro_ms_dx.setValue(p.get("dx", 0))
+            self._macro_ms_dy.setValue(p.get("dy", 0))
+            self._macro_edit_stack.setCurrentIndex(8)
         else:
             self._macro_edit_stack.setCurrentIndex(0)
         self._macro_loading = False
@@ -736,8 +993,38 @@ class ButtonEditorDialog(QDialog):
             step["params"]["use_clipboard"] = self._macro_text_clipboard.isChecked()
         elif step_type == "delay":
             step["params"]["ms"] = self._macro_delay_spin.value()
+        elif step_type == "mouse_down":
+            step["params"]["button"] = self._macro_md_btn.currentText()
+            step["params"]["x"] = self._macro_md_x.value()
+            step["params"]["y"] = self._macro_md_y.value()
+        elif step_type == "mouse_up":
+            step["params"]["button"] = self._macro_mu_btn.currentText()
+            step["params"]["x"] = self._macro_mu_x.value()
+            step["params"]["y"] = self._macro_mu_y.value()
+        elif step_type == "mouse_scroll":
+            step["params"]["x"] = self._macro_ms_x.value()
+            step["params"]["y"] = self._macro_ms_y.value()
+            step["params"]["dx"] = self._macro_ms_dx.value()
+            step["params"]["dy"] = self._macro_ms_dy.value()
 
         # Update list item text
         item = self._macro_step_list.item(row)
         if item:
             item.setText(f"{row + 1}. {self._macro_step_summary(step)}")
+
+    def _macro_start_recording(self) -> None:
+        from ..services.macro_recorder import MacroRecorder
+        from .macro_recording_dialog import MacroRecordingDialog
+
+        recorder = MacroRecorder()
+        recorder.start()
+
+        dialog = MacroRecordingDialog(recorder, self)
+        result = dialog.exec()
+
+        if result == QDialog.DialogCode.Accepted:
+            steps = dialog.get_recorded_steps()
+            if steps:
+                self._macro_steps.extend(steps)
+                self._macro_refresh_list()
+                self._macro_step_list.setCurrentRow(len(self._macro_steps) - 1)

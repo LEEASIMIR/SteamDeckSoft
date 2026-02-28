@@ -4,8 +4,8 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QSize, QRect, QMimeData, QPoint
-from PyQt6.QtGui import QFont, QIcon, QMouseEvent, QPainter, QPixmap, QColor, QDrag
+from PyQt6.QtCore import Qt, QSize, QRect, QMimeData, QPoint, QTimer
+from PyQt6.QtGui import QFont, QFontMetrics, QIcon, QMouseEvent, QPainter, QPixmap, QColor, QDrag
 from PyQt6.QtWidgets import QPushButton, QMenu, QStyleOptionButton, QStyle, QApplication
 
 from ..config.models import ButtonConfig
@@ -15,6 +15,25 @@ if TYPE_CHECKING:
     from .main_window import MainWindow
 
 logger = logging.getLogger(__name__)
+
+
+def _load_pixmap(path: str, render_size: int = 128) -> QPixmap:
+    """Load an image file as QPixmap. SVG files are rendered at *render_size*
+    via QSvgRenderer for crisp output; other formats use QPixmap directly."""
+    if path.lower().endswith(".svg"):
+        try:
+            from PyQt6.QtSvg import QSvgRenderer
+            renderer = QSvgRenderer(path)
+            if renderer.isValid():
+                pm = QPixmap(QSize(render_size, render_size))
+                pm.fill(QColor(0, 0, 0, 0))
+                p = QPainter(pm)
+                renderer.render(p)
+                p.end()
+                return pm
+        except ImportError:
+            pass
+    return QPixmap(path)
 
 
 
@@ -29,6 +48,7 @@ class DeckButton(QPushButton):
         action_registry: ActionRegistry,
         main_window: MainWindow,
         size: int = 100,
+        width_override: int = 0,
     ) -> None:
         super().__init__()
         self._row = row
@@ -42,11 +62,20 @@ class DeckButton(QPushButton):
         self._scaled_icon_size: int = 0
         self._media_is_playing: bool = False
         self._media_is_muted: bool = False
+        self._media_is_mic_muted: bool = False
+
+        # Marquee scroll animation state
+        self._scroll_offset: float = 0.0
+        self._scroll_max: float = 0.0
+        self._scroll_phase: int = 0  # 0=PAUSE_START, 1=SCROLL, 2=PAUSE_END
+        self._scroll_counter: int = 0
+        self._scroll_timer: QTimer | None = None
+        self._scroll_active: bool = False
 
         self._drag_start_pos: QPoint | None = None
 
         self.setObjectName("deckButton")
-        self.setFixedSize(size, size)
+        self.setFixedSize(width_override or size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAcceptDrops(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -58,7 +87,7 @@ class DeckButton(QPushButton):
         if self._config and self._config.action.type:
             self.clicked.connect(self._on_clicked)
 
-    def reconfigure(self, config: ButtonConfig | None, size: int) -> None:
+    def reconfigure(self, config: ButtonConfig | None, size: int, width_override: int = 0) -> None:
         """Update this button with a new config without recreating the widget."""
         # Disconnect old clicked handler
         try:
@@ -71,8 +100,9 @@ class DeckButton(QPushButton):
         self._icon_pixmap = None
         self._scaled_icon = None
         self._scaled_icon_size = 0
+        self._stop_scroll()
 
-        self.setFixedSize(size, size)
+        self.setFixedSize(width_override or size, size)
         self._apply_style()
         self._update_display()
 
@@ -111,6 +141,7 @@ class DeckButton(QPushButton):
     _MEDIA_TOGGLE_KEYS = {
         "play_pause": (("pause_icon", "pause_label"), ("play_icon", "play_label")),
         "mute": (("unmute_icon", "unmute_label"), ("mute_icon", "mute_label")),
+        "mic_mute": (("mic_on_icon", "mic_on_label"), ("mic_off_icon", "mic_off_label")),
     }
 
     def _get_media_toggle_state(self, command: str) -> bool:
@@ -119,6 +150,8 @@ class DeckButton(QPushButton):
             return self._media_is_playing
         if command == "mute":
             return self._media_is_muted
+        if command == "mic_mute":
+            return not self._media_is_mic_muted  # active = mic on (not muted)
         return False
 
     def _update_display(self) -> None:
@@ -154,7 +187,7 @@ class DeckButton(QPushButton):
             icon_path = get_default_icon_path(self._config.action.type, params)
 
         if icon_path:
-            self._icon_pixmap = QPixmap(icon_path)
+            self._icon_pixmap = _load_pixmap(icon_path)
         else:
             self._icon_pixmap = None
         self._scaled_icon = None
@@ -174,21 +207,108 @@ class DeckButton(QPushButton):
             self.setText("")
             return
 
+        # User-defined label takes priority over action display text
+        if self._config.label:
+            self.setText(self._config.label)
+            return
+
         display = self._action_registry.get_display_text(
             self._config.action.type, self._config.action.params
         )
-        if display:
-            self.setText(display)
+        self.setText(display or "")
+
+    # --- Marquee scroll ---
+
+    _SCROLL_TEXT_PADDING = 6
+    _SCROLL_INTERVAL_MS = 33   # ~30 fps
+    _PAUSE_START_TICKS = 45    # ~1.5 s
+    _PAUSE_END_TICKS = 30      # ~1.0 s
+    _SCROLL_PX_PER_TICK = 1.0  # ~30 px/s
+
+    def setText(self, text: str) -> None:
+        old = self.text()
+        super().setText(text)
+        if text != old:
+            self._stop_scroll()
+        self._check_scroll_needed()
+
+    def _check_scroll_needed(self) -> None:
+        text = self.text()
+        if not text:
+            self._stop_scroll()
+            return
+
+        # Resolve display font
+        font = self.font()
+        default_family = self._main_window._config_manager.settings.default_label_family
+        if default_family:
+            font.setFamily(default_family)
+        if self._config and self._config.label_size:
+            font.setPixelSize(self._config.label_size)
         else:
-            self.setText(self._config.label)
+            font.setPixelSize(
+                self._main_window._config_manager.settings.default_label_size
+            )
+
+        fm = QFontMetrics(font)
+        pad = self._SCROLL_TEXT_PADDING
+        available = self.width() - pad * 2
+
+        max_w = 0
+        for line in text.split("\n"):
+            max_w = max(max_w, fm.horizontalAdvance(line))
+
+        if max_w > available:
+            self._scroll_max = float(max_w - available)
+            self._scroll_offset = 0.0
+            self._scroll_phase = 0
+            self._scroll_counter = 0
+            if not self._scroll_active:
+                self._scroll_active = True
+                if self._scroll_timer is None:
+                    self._scroll_timer = QTimer(self)
+                    self._scroll_timer.timeout.connect(self._tick_scroll)
+                self._scroll_timer.start(self._SCROLL_INTERVAL_MS)
+        else:
+            self._stop_scroll()
+
+    def _tick_scroll(self) -> None:
+        if self._scroll_phase == 0:  # PAUSE_START
+            self._scroll_counter += 1
+            if self._scroll_counter >= self._PAUSE_START_TICKS:
+                self._scroll_phase = 1
+                self._scroll_counter = 0
+        elif self._scroll_phase == 1:  # SCROLL
+            self._scroll_offset += self._SCROLL_PX_PER_TICK
+            if self._scroll_offset >= self._scroll_max:
+                self._scroll_offset = self._scroll_max
+                self._scroll_phase = 2
+                self._scroll_counter = 0
+        elif self._scroll_phase == 2:  # PAUSE_END
+            self._scroll_counter += 1
+            if self._scroll_counter >= self._PAUSE_END_TICKS:
+                self._scroll_phase = 0
+                self._scroll_counter = 0
+                self._scroll_offset = 0.0
+        self.update()
+
+    def _stop_scroll(self) -> None:
+        if self._scroll_timer is not None:
+            self._scroll_timer.stop()
+        self._scroll_active = False
+        self._scroll_offset = 0.0
+        self._scroll_phase = 0
+        self._scroll_counter = 0
 
     def paintEvent(self, event) -> None:
-        if not (self._icon_pixmap and not self._icon_pixmap.isNull()):
+        has_icon = self._icon_pixmap and not self._icon_pixmap.isNull()
+        if not has_icon and not self._scroll_active:
             super().paintEvent(event)
             return
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
         # 1) Draw button background (no text/icon)
         opt = QStyleOptionButton()
@@ -198,18 +318,19 @@ class DeckButton(QPushButton):
         self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
 
         # 2) Draw icon (cached scaled pixmap)
-        padding = 10
-        available = min(self.width(), self.height()) - padding * 2
-        if self._scaled_icon is None or self._scaled_icon_size != available:
-            self._scaled_icon = self._icon_pixmap.scaled(
-                available, available,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self._scaled_icon_size = available
-        x = (self.width() - self._scaled_icon.width()) // 2
-        y = (self.height() - self._scaled_icon.height()) // 2
-        painter.drawPixmap(x, y, self._scaled_icon)
+        if has_icon:
+            padding = 2
+            available = min(self.width(), self.height()) - padding * 2
+            if self._scaled_icon is None or self._scaled_icon_size != available:
+                self._scaled_icon = self._icon_pixmap.scaled(
+                    available, available,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self._scaled_icon_size = available
+            x = (self.width() - self._scaled_icon.width()) // 2
+            y = (self.height() - self._scaled_icon.height()) // 2
+            painter.drawPixmap(x, y, self._scaled_icon)
 
         # 3) Draw label text on top
         text = self.text()
@@ -230,7 +351,20 @@ class DeckButton(QPushButton):
                 font_size = self._main_window._config_manager.settings.default_label_size
             font.setPixelSize(font_size)
             painter.setFont(font)
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
+
+            if self._scroll_active:
+                pad = self._SCROLL_TEXT_PADDING
+                painter.setClipRect(pad, 0, self.width() - pad * 2, self.height())
+                text_rect = QRect(
+                    pad - int(self._scroll_offset), 0, 9999, self.height(),
+                )
+                painter.drawText(
+                    text_rect,
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                    text,
+                )
+            else:
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
 
         painter.end()
 
@@ -319,7 +453,8 @@ class DeckButton(QPushButton):
 
         event.acceptProposedAction()
 
-    _FOREGROUND_ACTIONS = frozenset({"launch_app", "open_url", "run_command"})
+    _FOREGROUND_ACTIONS = frozenset({"launch_app", "open_url", "open_folder", "run_command"})
+    _TARGET_FOCUS_ACTIONS = frozenset({"hotkey", "text_input", "macro"})
 
     def _on_clicked(self) -> None:
         if not (self._config and self._config.action.type):
@@ -332,6 +467,15 @@ class DeckButton(QPushButton):
             self._main_window.launch_with_foreground(
                 lambda: self._action_registry.execute(action_type, params),
             )
+        elif action_type in self._TARGET_FOCUS_ACTIONS:
+            if self._main_window.focus_mapped_app():
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(
+                    100,
+                    lambda: self._action_registry.execute(action_type, params),
+                )
+            else:
+                self._action_registry.execute(action_type, params)
         else:
             self._action_registry.execute(action_type, params)
 
@@ -368,7 +512,7 @@ class DeckButton(QPushButton):
             icon_path = get_default_icon_path(self._config.action.type, params)
 
         if icon_path:
-            self._icon_pixmap = QPixmap(icon_path)
+            self._icon_pixmap = _load_pixmap(icon_path)
         else:
             self._icon_pixmap = None
 
@@ -385,6 +529,8 @@ class DeckButton(QPushButton):
                 self.setText("\u23f8" if active else "\u25b6")
             elif command == "mute":
                 self.setText("\U0001f507" if active else "\U0001f50a")
+            elif command == "mic_mute":
+                self.setText("\U0001f3a4" if active else "\U0001f507")
 
         self._scaled_icon = None
         self._scaled_icon_size = 0
@@ -399,6 +545,50 @@ class DeckButton(QPushButton):
         """Update icon/label for mute buttons based on mute state."""
         self._media_is_muted = is_muted
         self._update_media_toggle("mute")
+
+    def update_mic_mute_state(self, is_muted: bool) -> None:
+        """Update icon/label for mic_mute buttons based on mic mute state."""
+        self._media_is_mic_muted = is_muted
+        self._update_media_toggle("mic_mute")
+
+    def update_now_playing(self, text: str, thumbnail: bytes = b"") -> None:
+        """Update now_playing buttons with track info text and album art."""
+        if not self._config or self._config.action.type != "media_control":
+            return
+        if self._config.action.params.get("command") != "now_playing":
+            return
+        self._monitor_text = text if text else "Now Playing"
+        self.setText(self._monitor_text)
+
+        # Update icon from thumbnail bytes
+        if thumbnail:
+            pm = QPixmap()
+            pm.loadFromData(thumbnail)
+            if not pm.isNull():
+                self._icon_pixmap = pm
+                self._scaled_icon = None
+                self._scaled_icon_size = 0
+                self.update()
+                return
+        # No thumbnail — fall back to default icon
+        if not (self._config.icon and os.path.isfile(self._config.icon)):
+            from .default_icons import get_default_icon_path
+            icon_path = get_default_icon_path(
+                self._config.action.type, self._config.action.params,
+            )
+            self._icon_pixmap = _load_pixmap(icon_path) if icon_path else None
+        self._scaled_icon = None
+        self._scaled_icon_size = 0
+        self.update()
+
+    def update_device_name(self, name: str) -> None:
+        """Update audio_device_switch buttons with current device name."""
+        if not self._config or self._config.action.type != "media_control":
+            return
+        if self._config.action.params.get("command") != "audio_device_switch":
+            return
+        self._monitor_text = name if name else "Audio Device"
+        self.setText(self._monitor_text)
 
     def _show_context_menu(self, pos) -> None:
         menu = QMenu(self)

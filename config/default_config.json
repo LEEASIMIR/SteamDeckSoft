@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "app_version": "0.1.0-beta",
+  "app_version": "0.1.1",
   "settings": {
-    "grid_rows": 3,
+    "grid_rows": 4,
     "grid_cols": 3,
     "button_size": 100,
     "button_spacing": 8,
@@ -115,6 +115,15 @@
             "folder_id": "apps01"
           }
         }
+      },
+      {
+        "position": [3, 0],
+        "label": "Back",
+        "icon": "",
+        "action": {
+          "type": "navigate_parent",
+          "params": {}
+        }
       }
     ],
     "children": [
@@ -221,6 +230,15 @@
                 "url": "https://google.com"
               }
             }
+          },
+          {
+            "position": [3, 0],
+            "label": "Back",
+            "icon": "",
+            "action": {
+              "type": "navigate_parent",
+              "params": {}
+            }
           }
         ],
         "children": [
@@ -326,6 +344,15 @@
                   "params": {
                     "keys": "win+l"
                   }
+                }
+              },
+              {
+                "position": [3, 0],
+                "label": "Back",
+                "icon": "",
+                "action": {
+                  "type": "navigate_parent",
+                  "params": {}
                 }
               }
             ],

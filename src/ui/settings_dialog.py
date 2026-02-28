@@ -63,6 +63,11 @@ class SettingsDialog(QDialog):
         behavior_group = QGroupBox("Behavior")
         behavior_form = QFormLayout(behavior_group)
 
+        self._input_mode_combo = QComboBox()
+        self._input_mode_combo.addItem("Shortcut Mode (단축키 모드)", "shortcut")
+        self._input_mode_combo.addItem("Widget Mode (위젯 모드)", "widget")
+        behavior_form.addRow("Input Mode:", self._input_mode_combo)
+
         self._auto_switch_check = QCheckBox("Auto-switch folders based on active app")
         behavior_form.addRow(self._auto_switch_check)
 
@@ -109,6 +114,10 @@ class SettingsDialog(QDialog):
         self._default_label_size_spin.setValue(s.default_label_size)
         if s.default_label_family:
             self._default_label_family_combo.setCurrentFont(QFont(s.default_label_family))
+        for i in range(self._input_mode_combo.count()):
+            if self._input_mode_combo.itemData(i) == s.input_mode:
+                self._input_mode_combo.setCurrentIndex(i)
+                break
         self._auto_switch_check.setChecked(s.auto_switch_enabled)
         self._always_on_top_check.setChecked(s.always_on_top)
 
@@ -127,6 +136,7 @@ class SettingsDialog(QDialog):
         s.button_spacing = self._spacing_spin.value()
         s.default_label_size = self._default_label_size_spin.value()
         s.default_label_family = self._default_label_family_combo.currentFont().family()
+        s.input_mode = self._input_mode_combo.currentData()
         s.auto_switch_enabled = self._auto_switch_check.isChecked()
         s.always_on_top = self._always_on_top_check.isChecked()
         s.theme = self._theme_combo.currentData()

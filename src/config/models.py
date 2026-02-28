@@ -109,11 +109,12 @@ class PageConfig:
 
 @dataclass
 class AppSettings:
-    grid_rows: int = 3
+    grid_rows: int = 4
     grid_cols: int = 5
     button_size: int = 60
     button_spacing: int = 8
     default_label_size: int = 10
+    input_mode: str = "shortcut"  # "shortcut" or "widget"
     auto_switch_enabled: bool = True
     always_on_top: bool = True
     theme: str = "dark"
@@ -131,6 +132,7 @@ class AppSettings:
             "button_spacing": self.button_spacing,
             "default_label_size": self.default_label_size,
             "default_label_family": self.default_label_family,
+            "input_mode": self.input_mode,
             "auto_switch_enabled": self.auto_switch_enabled,
             "always_on_top": self.always_on_top,
             "theme": self.theme,
@@ -143,12 +145,13 @@ class AppSettings:
     @classmethod
     def from_dict(cls, data: dict) -> AppSettings:
         return cls(
-            grid_rows=data.get("grid_rows", 3),
+            grid_rows=data.get("grid_rows", 4),
             grid_cols=data.get("grid_cols", 5),
             button_size=data.get("button_size", 60),
             button_spacing=data.get("button_spacing", 8),
             default_label_size=data.get("default_label_size", 10),
             default_label_family=data.get("default_label_family", ""),
+            input_mode=data.get("input_mode", "shortcut") if data.get("input_mode") in ("shortcut", "widget") else "shortcut",
             auto_switch_enabled=data.get("auto_switch_enabled", True),
             always_on_top=data.get("always_on_top", True),
             theme=data.get("theme", "dark"),

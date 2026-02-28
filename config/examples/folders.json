@@ -1,0 +1,57 @@
+{
+  "version": "0.1.1",
+  "name_suffix": "폴더",
+  "folder": {
+    "id": "example_folders",
+    "name": "0.1.1_폴더",
+    "mapped_apps": [],
+    "buttons": [
+      {
+        "position": [0, 0],
+        "label": "사진",
+        "icon": "",
+        "action": {
+          "type": "open_folder",
+          "params": {
+            "path": "%USERPROFILE%/Pictures"
+          }
+        }
+      },
+      {
+        "position": [0, 1],
+        "label": "문서",
+        "icon": "",
+        "action": {
+          "type": "open_folder",
+          "params": {
+            "path": "%USERPROFILE%/Documents"
+          }
+        }
+      },
+      {
+        "position": [0, 2],
+        "label": "다운로드",
+        "icon": "",
+        "action": {
+          "type": "open_folder",
+          "params": {
+            "path": "%USERPROFILE%/Downloads"
+          }
+        }
+      },
+      {
+        "position": [1, 0],
+        "label": "바탕화면",
+        "icon": "",
+        "action": {
+          "type": "open_folder",
+          "params": {
+            "path": "%USERPROFILE%/Desktop"
+          }
+        }
+      }
+    ],
+    "children": [],
+    "expanded": true
+  }
+}

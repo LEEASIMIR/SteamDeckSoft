@@ -23,3 +23,29 @@ class NavigateFolderAction(ActionBase):
 
     def get_display_text(self, params: dict[str, Any]) -> str | None:
         return None
+
+
+class NavigateParentAction(ActionBase):
+    def __init__(self, registry) -> None:
+        self._registry = registry
+
+    def execute(self, params: dict[str, Any]) -> None:
+        window = self._registry.main_window
+        if window is not None:
+            window.navigate_parent()
+
+    def get_display_text(self, params: dict[str, Any]) -> str | None:
+        return None
+
+
+class NavigateBackAction(ActionBase):
+    def __init__(self, registry) -> None:
+        self._registry = registry
+
+    def execute(self, params: dict[str, Any]) -> None:
+        window = self._registry.main_window
+        if window is not None:
+            window.navigate_back()
+
+    def get_display_text(self, params: dict[str, Any]) -> str | None:
+        return None

@@ -196,6 +196,10 @@ _EDGE_CURSORS = {
 class MainWindow(QMainWindow):
     _RESIZE_MARGIN = 6
 
+    # Numpad physical layout: row 3 col 0 spans 2 columns (Numpad 0 key)
+    _COLSPAN: dict[tuple[int, int], int] = {(3, 0): 2}
+    _HIDDEN: frozenset[tuple[int, int]] = frozenset({(3, 1)})
+
     def __init__(
         self,
         config_manager: ConfigManager,
@@ -207,6 +211,8 @@ class MainWindow(QMainWindow):
         self._action_registry = action_registry
         self._plugin_loader = plugin_loader
         self._current_folder_id: str = "root"
+        self._folder_history: list[str] = []
+        self._navigating_back: bool = False
         self._buttons: dict[tuple[int, int], object] = {}
         self._folder_tree = None
         self._window_monitor = None
@@ -214,6 +220,10 @@ class MainWindow(QMainWindow):
         self._input_detector = None
         self._last_media_playing: bool = False
         self._last_media_muted: bool = False
+        self._last_mic_muted: bool = False
+        self._last_now_playing: str = ""
+        self._last_now_playing_thumb: bytes = b""
+        self._last_device_name: str = ""
 
         self._theme = get_theme(config_manager.settings.theme)
 
@@ -246,7 +256,7 @@ class MainWindow(QMainWindow):
     def _apply_size(self, settings=None) -> None:
         if settings is None:
             settings = self._config_manager.settings
-        tree_width = 180 if settings.folder_tree_visible else 0
+        tree_width = 140 if settings.folder_tree_visible else 0
         width = (
             settings.grid_cols * (settings.button_size + settings.button_spacing)
             + settings.button_spacing + 16 + tree_width
@@ -295,7 +305,7 @@ class MainWindow(QMainWindow):
         # Splitter sizing: tree gets ~180px, grid gets the rest
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
-        self._splitter.setSizes([180, 500])
+        self._splitter.setSizes([140, 500])
 
         main_layout.addWidget(self._splitter, 1)
 
@@ -333,22 +343,43 @@ class MainWindow(QMainWindow):
         for btn_cfg in folder.buttons:
             button_map[btn_cfg.position] = btn_cfg
 
+        # Auto-fill navigation buttons if empty
+        if self._current_folder_id != "root":
+            # (3,0) — navigate to parent folder (non-root only)
+            _PARENT_POS = (3, 0)
+            if _PARENT_POS not in button_map or not button_map[_PARENT_POS].action.type:
+                button_map[_PARENT_POS] = ButtonConfig(
+                    position=_PARENT_POS,
+                    action=ActionConfig(type="navigate_parent", params={}),
+                )
+        # (3,2) — navigate back (history, all folders including root)
+        _BACK_POS = (3, 2)
+        if _BACK_POS not in button_map or not button_map[_BACK_POS].action.type:
+            button_map[_BACK_POS] = ButtonConfig(
+                position=_BACK_POS,
+                action=ActionConfig(type="navigate_back", params={}),
+            )
+
+        # Build the set of active grid positions (excluding hidden cells)
+        active_positions = {
+            (r, c)
+            for r in range(settings.grid_rows)
+            for c in range(settings.grid_cols)
+            if (r, c) not in self._HIDDEN
+        }
+
         # Check if we can reuse existing button widgets (same grid dimensions)
         can_reuse = (
             self._buttons
-            and len(self._buttons) == settings.grid_rows * settings.grid_cols
-            and all(
-                (r, c) in self._buttons
-                for r in range(settings.grid_rows)
-                for c in range(settings.grid_cols)
-            )
+            and set(self._buttons.keys()) == active_positions
         )
 
         if can_reuse:
-            for row in range(settings.grid_rows):
-                for col in range(settings.grid_cols):
-                    btn_cfg = button_map.get((row, col))
-                    self._buttons[(row, col)].reconfigure(btn_cfg, settings.button_size)
+            for pos in active_positions:
+                btn_cfg = button_map.get(pos)
+                colspan = self._COLSPAN.get(pos, 1)
+                w = settings.button_size * colspan + settings.button_spacing * (colspan - 1) if colspan > 1 else 0
+                self._buttons[pos].reconfigure(btn_cfg, settings.button_size, w)
         else:
             # Full rebuild — grid dimensions changed
             for btn in self._buttons.values():
@@ -358,11 +389,15 @@ class MainWindow(QMainWindow):
 
             for row in range(settings.grid_rows):
                 for col in range(settings.grid_cols):
+                    if (row, col) in self._HIDDEN:
+                        continue
                     btn_cfg = button_map.get((row, col))
+                    colspan = self._COLSPAN.get((row, col), 1)
+                    w = settings.button_size * colspan + settings.button_spacing * (colspan - 1) if colspan > 1 else 0
                     deck_btn = DeckButton(
-                        row, col, btn_cfg, self._action_registry, self, settings.button_size
+                        row, col, btn_cfg, self._action_registry, self, settings.button_size, w
                     )
-                    self._grid_layout.addWidget(deck_btn, row, col)
+                    self._grid_layout.addWidget(deck_btn, row, col, 1, colspan)
                     self._buttons[(row, col)] = deck_btn
 
         # Re-apply cached media states to newly loaded buttons
@@ -372,16 +407,32 @@ class MainWindow(QMainWindow):
         if self._last_media_muted:
             for btn in self._buttons.values():
                 btn.update_mute_state(self._last_media_muted)
+        if self._last_mic_muted:
+            for btn in self._buttons.values():
+                btn.update_mic_mute_state(self._last_mic_muted)
+        if self._last_now_playing:
+            for btn in self._buttons.values():
+                btn.update_now_playing(self._last_now_playing, self._last_now_playing_thumb)
+        if self._last_device_name:
+            for btn in self._buttons.values():
+                btn.update_device_name(self._last_device_name)
 
     def switch_to_folder_id(self, folder_id: str) -> None:
         folder = self._config_manager.get_folder_by_id(folder_id)
-        if folder is not None:
-            self._current_folder_id = folder_id
-            self._load_current_folder()
-            # Sync tree selection
-            if self._folder_tree is not None:
-                self._folder_tree.select_folder_by_id(folder_id)
-            logger.info("Switched to folder: %s", folder.name)
+        if folder is None:
+            return
+        if folder_id == self._current_folder_id:
+            return
+        if not self._navigating_back:
+            self._folder_history.append(self._current_folder_id)
+            if len(self._folder_history) > 50:
+                self._folder_history = self._folder_history[-50:]
+        self._current_folder_id = folder_id
+        self._load_current_folder()
+        # Sync tree selection
+        if self._folder_tree is not None:
+            self._folder_tree.select_folder_by_id(folder_id)
+        logger.info("Switched to folder: %s", folder.name)
 
     def get_current_folder_id(self) -> str:
         return self._current_folder_id
@@ -429,6 +480,22 @@ class MainWindow(QMainWindow):
         self._last_media_muted = is_muted
         for btn in self._buttons.values():
             btn.update_mute_state(is_muted)
+
+    def update_mic_mute_state(self, is_muted: bool) -> None:
+        self._last_mic_muted = is_muted
+        for btn in self._buttons.values():
+            btn.update_mic_mute_state(is_muted)
+
+    def update_now_playing(self, text: str, thumbnail: bytes = b"") -> None:
+        self._last_now_playing = text
+        self._last_now_playing_thumb = thumbnail
+        for btn in self._buttons.values():
+            btn.update_now_playing(text, thumbnail)
+
+    def update_device_name(self, name: str) -> None:
+        self._last_device_name = name
+        for btn in self._buttons.values():
+            btn.update_device_name(name)
 
     def show_on_primary(self) -> None:
         settings = self._config_manager.settings
@@ -560,6 +627,130 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(800, _bring_new_to_front)
 
+    def focus_mapped_app(self) -> bool:
+        """Focus the window of a mapped app for the current folder.
+
+        Returns True if focus was set (caller should delay action execution),
+        False if no mapped app found or already focused (execute immediately).
+        """
+        folder = self._config_manager.get_folder_by_id(self._current_folder_id)
+        if folder is None or not folder.mapped_apps:
+            return False
+
+        import ctypes
+        import psutil
+
+        target_set = {app.lower() for app in folder.mapped_apps}
+
+        # Check if foreground app is already a mapped app
+        try:
+            fg_hwnd = ctypes.windll.user32.GetForegroundWindow()
+            if fg_hwnd:
+                import win32gui
+                import win32process
+                _, fg_pid = win32process.GetWindowThreadProcessId(fg_hwnd)
+                if fg_pid:
+                    fg_exe = psutil.Process(fg_pid).name().lower()
+                    if fg_exe in target_set:
+                        return False  # Already focused — no delay needed
+        except Exception:
+            pass
+
+        target_hwnd = self._find_mapped_app_window(target_set)
+        if target_hwnd is None:
+            return False  # App not running — execute immediately
+
+        self._focus_existing_window(target_hwnd)
+        return True
+
+    def _find_mapped_app_window(self, target_set: set[str]) -> int | None:
+        """Find a visible window HWND belonging to one of the target exe names."""
+        import ctypes
+        from ctypes import wintypes
+        import win32process
+        import psutil
+
+        user32 = ctypes.windll.user32
+        our_hwnd = int(self.winId())
+        result: list[int] = []
+
+        GWL_EXSTYLE = -20
+        WS_EX_TOOLWINDOW = 0x00000080
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM,
+        )
+
+        @WNDENUMPROC
+        def _check(hwnd, _):
+            h = int(hwnd)
+            if h == our_hwnd or not user32.IsWindowVisible(hwnd):
+                return True
+            ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if ex_style & WS_EX_TOOLWINDOW:
+                return True
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(h)
+                if pid:
+                    exe = psutil.Process(pid).name().lower()
+                    if exe in target_set:
+                        result.append(h)
+                        return False  # Found — stop enumeration
+            except Exception:
+                pass
+            return True
+
+        user32.EnumWindows(_check, 0)
+        return result[0] if result else None
+
+    def _focus_existing_window(self, target_hwnd: int) -> None:
+        """Bring an existing window to the foreground."""
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        our_hwnd = int(self.winId())
+
+        GWL_EXSTYLE = -20
+        WS_EX_NOACTIVATE = 0x08000000
+        SW_RESTORE = 9
+        SWP_NOMOVE_NOSIZE = 0x0001 | 0x0002
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+
+        # Temporarily remove WS_EX_NOACTIVATE from our window
+        old_style = user32.GetWindowLongW(our_hwnd, GWL_EXSTYLE)
+        user32.SetWindowLongW(
+            our_hwnd, GWL_EXSTYLE, old_style & ~WS_EX_NOACTIVATE,
+        )
+
+        try:
+            fg = user32.GetForegroundWindow()
+            fg_tid = user32.GetWindowThreadProcessId(fg, None)
+            our_tid = kernel32.GetCurrentThreadId()
+
+            attached = False
+            if fg_tid and fg_tid != our_tid:
+                attached = bool(user32.AttachThreadInput(our_tid, fg_tid, True))
+
+            # Restore minimized windows
+            if user32.IsIconic(target_hwnd):
+                user32.ShowWindow(target_hwnd, SW_RESTORE)
+
+            # TOPMOST/NOTOPMOST trick for reliable focus
+            user32.SetWindowPos(
+                target_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE_NOSIZE,
+            )
+            user32.SetWindowPos(
+                target_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE_NOSIZE,
+            )
+            user32.SetForegroundWindow(target_hwnd)
+
+            if attached:
+                user32.AttachThreadInput(our_tid, fg_tid, False)
+        finally:
+            user32.SetWindowLongW(our_hwnd, GWL_EXSTYLE, old_style)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         # Reinforce WS_EX_NOACTIVATE so clicks never steal focus
@@ -600,6 +791,11 @@ class MainWindow(QMainWindow):
         if self._folder_tree:
             self._folder_tree.rebuild()
         self._load_current_folder()
+        # Apply input mode change (shortcut ↔ widget)
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if hasattr(app, 'apply_input_mode'):
+            app.apply_input_mode()
 
     def apply_theme(self, theme_name: str) -> None:
         """Switch to a new theme, updating all stylesheets."""
@@ -649,13 +845,31 @@ class MainWindow(QMainWindow):
         if btn is not None:
             btn.animateClick()
 
-    def navigate_back(self) -> None:
-        """Navigate to parent folder. Numpad 0 triggers this."""
+    def navigate_parent(self) -> None:
+        """Navigate to parent folder."""
         if self._current_folder_id == "root":
             return
         parent = self._config_manager.find_parent_folder(self._current_folder_id)
         if parent is not None:
             self.switch_to_folder_id(parent.id)
+
+    def navigate_back(self) -> None:
+        """Navigate to previous folder via history, or parent as fallback."""
+        if self._folder_history:
+            target_id = self._folder_history.pop()
+            folder = self._config_manager.get_folder_by_id(target_id)
+            if folder is None:
+                self.navigate_back()
+                return
+            self._navigating_back = True
+            self.switch_to_folder_id(target_id)
+            self._navigating_back = False
+        elif self._current_folder_id != "root":
+            parent = self._config_manager.find_parent_folder(self._current_folder_id)
+            if parent is not None:
+                self._navigating_back = True
+                self.switch_to_folder_id(parent.id)
+                self._navigating_back = False
 
     # --- Opacity -------------------------------------------------------
 

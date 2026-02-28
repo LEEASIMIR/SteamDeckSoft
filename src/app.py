@@ -21,10 +21,11 @@ from .actions.registry import ActionRegistry
 from .actions.launch_app import LaunchAppAction
 from .actions.hotkey import HotkeyAction
 from .actions.system_monitor import SystemMonitorAction
-from .actions.navigate import NavigateFolderAction
+from .actions.navigate import NavigateBackAction, NavigateFolderAction, NavigateParentAction
 from .actions.text_input import TextInputAction
 from .actions.macro import MacroAction
 from .actions.open_url import OpenUrlAction
+from .actions.open_folder import OpenFolderAction
 from .actions.run_command import RunCommandAction
 from .services.system_stats import SystemStatsService
 from .services.window_monitor import ActiveWindowMonitor
@@ -73,13 +74,13 @@ class SoftDeckApp(QApplication):
 
         # Input detector (injected key filter + global numpad shortcuts)
         self._input_detector = InputDetector()
-        self._input_detector.start()
+        if self._config_manager.settings.input_mode == "shortcut":
+            self._input_detector.start()
 
         # Main window
         self._main_window = MainWindow(self._config_manager, self._action_registry, self._plugin_loader)
         self._main_window.set_input_detector(self._input_detector)
         self._input_detector.numpad_signal.pressed.connect(self._main_window.on_global_numpad)
-        self._input_detector.numpad_signal.back_pressed.connect(self._main_window.navigate_back)
         self._input_detector.numpad_signal.numlock_changed.connect(self._on_numlock_changed)
         self._action_registry.set_main_window(self._main_window)
         self._main_window.set_toast_manager(self._toast_manager)
@@ -94,8 +95,10 @@ class SoftDeckApp(QApplication):
         # Apply theme
         self.setStyleSheet(self._theme.dark_theme)
 
-        # Show window only if Num Lock is OFF
-        if self._input_detector.is_numlock_on():
+        # Show window: widget mode → always show; shortcut mode → only if Num Lock OFF
+        if self._config_manager.settings.input_mode == "widget":
+            self._main_window.show()
+        elif self._input_detector.is_numlock_on():
             logger.info("Num Lock is ON at startup — window hidden")
         else:
             self._main_window.show()
@@ -135,12 +138,19 @@ class SoftDeckApp(QApplication):
         self._action_registry.register("macro", MacroAction())
         self._action_registry.register("system_monitor", SystemMonitorAction())
         self._action_registry.register("open_url", OpenUrlAction())
+        self._action_registry.register("open_folder", OpenFolderAction())
         self._action_registry.register("run_command", RunCommandAction())
 
         nav_action = NavigateFolderAction(self._action_registry)
         self._action_registry.register("navigate_folder", nav_action)
         # Backward compat: old configs with navigate_page type
         self._action_registry.register("navigate_page", nav_action)
+
+        nav_parent = NavigateParentAction(self._action_registry)
+        self._action_registry.register("navigate_parent", nav_parent)
+
+        nav_back = NavigateBackAction(self._action_registry)
+        self._action_registry.register("navigate_back", nav_back)
 
     def _load_plugins(self) -> None:
         self._plugin_loader.discover_and_load()
@@ -168,11 +178,14 @@ class SoftDeckApp(QApplication):
         # Media playback monitor
         self._playback_monitor = None
         self._mute_timer = None
+        self._mic_mute_timer = None
+        self._device_name_timer = None
         media_plugin = self._plugin_loader.plugins.get("media_control")
         if media_plugin is not None:
             monitor = media_plugin.get_playback_monitor()
             if monitor is not None and monitor.available:
                 monitor.playback_state_changed.connect(self._on_media_state_changed)
+                monitor.track_info_changed.connect(self._on_track_info_changed)
                 monitor.start()
                 self._playback_monitor = monitor
                 logger.info("Media playback monitor started")
@@ -186,8 +199,25 @@ class SoftDeckApp(QApplication):
                 self._mute_timer.start(500)
                 logger.info("Mute state polling started")
 
+                # Mic mute state polling
+                self._last_mic_mute_state = service.is_mic_muted()
+                self._mic_mute_timer = QTimer()
+                self._mic_mute_timer.timeout.connect(self._poll_mic_mute_state)
+                self._mic_mute_timer.start(500)
+                logger.info("Mic mute state polling started")
+
+                # Audio device name polling
+                self._last_device_name = service.get_current_audio_output_name()
+                self._main_window.update_device_name(self._last_device_name)
+                self._device_name_timer = QTimer()
+                self._device_name_timer.timeout.connect(self._poll_device_name)
+                self._device_name_timer.start(2000)
+                logger.info("Audio device name polling started")
+
     def _on_numlock_changed(self, is_on: bool) -> None:
         """Hide window when Num Lock is ON, show when OFF."""
+        if self._config_manager.settings.input_mode == "widget":
+            return
         if is_on:
             self._main_window.hide()
         else:
@@ -248,6 +278,30 @@ class SoftDeckApp(QApplication):
                 media_plugin._is_muted = muted
             self._main_window.update_mute_state(muted)
 
+    def _poll_mic_mute_state(self) -> None:
+        try:
+            muted = self._mute_service.is_mic_muted()
+        except Exception:
+            return
+        if muted != self._last_mic_mute_state:
+            self._last_mic_mute_state = muted
+            media_plugin = self._plugin_loader.plugins.get("media_control")
+            if media_plugin is not None:
+                media_plugin._is_mic_muted = muted
+            self._main_window.update_mic_mute_state(muted)
+
+    def _on_track_info_changed(self, text: str, thumbnail: bytes = b"") -> None:
+        self._main_window.update_now_playing(text, thumbnail)
+
+    def _poll_device_name(self) -> None:
+        try:
+            name = self._mute_service.get_current_audio_output_name()
+        except Exception:
+            return
+        if name != self._last_device_name:
+            self._last_device_name = name
+            self._main_window.update_device_name(name)
+
     def _notify_ready(self) -> None:
         """Toast notification + system sound to signal app is ready."""
         import winsound
@@ -303,6 +357,27 @@ class SoftDeckApp(QApplication):
 
         logger.error("Failed to acquire mutex after killing existing process")
         sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # Input mode switching
+    # ------------------------------------------------------------------
+
+    def apply_input_mode(self) -> None:
+        """Switch between shortcut and widget mode live (no restart)."""
+        mode = self._config_manager.settings.input_mode
+        if mode == "widget":
+            if self._input_detector.is_running:
+                self._input_detector.stop()
+                logger.info("Switched to widget mode — InputDetector stopped")
+            self._main_window.show_on_primary()
+        else:  # shortcut
+            if not self._input_detector.is_running:
+                self._input_detector.start()
+                logger.info("Switched to shortcut mode — InputDetector started")
+            if self._input_detector.is_numlock_on():
+                self._main_window.hide()
+            else:
+                self._main_window.show_on_primary()
 
     # ------------------------------------------------------------------
 

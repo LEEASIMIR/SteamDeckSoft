@@ -12,8 +12,11 @@ ACTION_ICON_MAP: dict[str, str] = {
     "system_monitor": "system_monitor",
     "navigate_folder": "navigate_folder",
     "open_url": "open_url",
+    "open_folder": "open_folder",
     "macro": "macro",
     "run_command": "run_command",
+    "navigate_parent": "navigate_parent",
+    "navigate_back": "navigate_back",
 }
 
 _plugin_icon_resolver: Callable[[str, dict[str, Any]], str] | None = None

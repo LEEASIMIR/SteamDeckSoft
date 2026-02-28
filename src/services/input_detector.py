@@ -60,7 +60,6 @@ class _SharedData(ctypes.Structure):
 
 class _NumpadSignal(QObject):
     pressed = pyqtSignal(int, int)
-    back_pressed = pyqtSignal()
     numlock_changed = pyqtSignal(bool)
 
 
@@ -98,8 +97,8 @@ class InputDetector:
         71: (0, 0), 72: (0, 1), 73: (0, 2),
         75: (1, 0), 76: (1, 1), 77: (1, 2),
         79: (2, 0), 80: (2, 1), 81: (2, 2),
+        82: (3, 0), 83: (3, 2),
     }
-    _NUMPAD_BACK_SCAN = 82
 
     _POLL_INTERVAL_MS = 16  # ~60 Hz
 
@@ -117,6 +116,10 @@ class InputDetector:
     def set_passthrough(self, value: bool) -> None:
         if self._shm is not None:
             self._shm.passthrough = 1 if value else 0
+
+    @property
+    def is_running(self) -> bool:
+        return self._proc is not None
 
     @property
     def last_was_injected(self) -> bool:
@@ -238,8 +241,6 @@ class InputDetector:
             pos = self._NUMPAD_SCAN_MAP.get(scan)
             if pos is not None:
                 self.numpad_signal.pressed.emit(pos[0], pos[1])
-            elif scan == self._NUMPAD_BACK_SCAN:
-                self.numpad_signal.back_pressed.emit()
 
         # Num Lock change
         if shm.nl_changed:
