@@ -57,6 +57,16 @@ class TitleBar(QWidget):
 
         layout.addStretch()
 
+        # Current folder name label (centered)
+        self._folder_label = QLabel("")
+        self._folder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._folder_label.setStyleSheet(
+            f"color: {p.text_dim}; font-size: 9px; padding: 0px; margin: 0px; background: transparent;"
+        )
+        layout.addWidget(self._folder_label)
+
+        layout.addStretch()
+
         # Opacity slider
         opacity_label = QLabel("\u25d0")
         opacity_label.setStyleSheet(f"color: {p.text_dim}; font-size: 8px; padding: 0px; margin: 0px;")
@@ -82,6 +92,9 @@ class TitleBar(QWidget):
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
+
+    def update_folder_name(self, name: str) -> None:
+        self._folder_label.setText(name)
 
     def _on_opacity_changed(self, value: int) -> None:
         self._opacity_slider.setToolTip(f"Opacity: {value}%")
@@ -112,7 +125,7 @@ class TitleBar(QWidget):
         from pathlib import Path
         from PyQt6.QtWidgets import QFileDialog, QMessageBox
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Config", "steamdecksoft_config.json",
+            self, "Export Config", "softdeck_config.json",
             "JSON Files (*.json)",
         )
         if not path:
@@ -208,7 +221,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
 
     def _setup_window(self) -> None:
-        self.setWindowTitle("SteamDeckSoft")
+        self.setWindowTitle("SoftDeck")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -299,16 +312,13 @@ class MainWindow(QMainWindow):
         self._load_current_folder()
 
     def _load_current_folder(self) -> None:
-        # Clear existing buttons
-        for btn in self._buttons.values():
-            btn.setParent(None)
-            btn.deleteLater()
-        self._buttons.clear()
-
         folder = self._config_manager.get_folder_by_id(self._current_folder_id)
         if folder is None:
             self._current_folder_id = "root"
             folder = self._config_manager.root_folder
+
+        # Update title bar folder name
+        self._title_bar.update_folder_name(folder.name)
 
         settings = self._config_manager.settings
 
@@ -319,14 +329,37 @@ class MainWindow(QMainWindow):
         for btn_cfg in folder.buttons:
             button_map[btn_cfg.position] = btn_cfg
 
-        for row in range(settings.grid_rows):
-            for col in range(settings.grid_cols):
-                btn_cfg = button_map.get((row, col))
-                deck_btn = DeckButton(
-                    row, col, btn_cfg, self._action_registry, self, settings.button_size
-                )
-                self._grid_layout.addWidget(deck_btn, row, col)
-                self._buttons[(row, col)] = deck_btn
+        # Check if we can reuse existing button widgets (same grid dimensions)
+        can_reuse = (
+            self._buttons
+            and len(self._buttons) == settings.grid_rows * settings.grid_cols
+            and all(
+                (r, c) in self._buttons
+                for r in range(settings.grid_rows)
+                for c in range(settings.grid_cols)
+            )
+        )
+
+        if can_reuse:
+            for row in range(settings.grid_rows):
+                for col in range(settings.grid_cols):
+                    btn_cfg = button_map.get((row, col))
+                    self._buttons[(row, col)].reconfigure(btn_cfg, settings.button_size)
+        else:
+            # Full rebuild — grid dimensions changed
+            for btn in self._buttons.values():
+                btn.setParent(None)
+                btn.deleteLater()
+            self._buttons.clear()
+
+            for row in range(settings.grid_rows):
+                for col in range(settings.grid_cols):
+                    btn_cfg = button_map.get((row, col))
+                    deck_btn = DeckButton(
+                        row, col, btn_cfg, self._action_registry, self, settings.button_size
+                    )
+                    self._grid_layout.addWidget(deck_btn, row, col)
+                    self._buttons[(row, col)] = deck_btn
 
     def switch_to_folder_id(self, folder_id: str) -> None:
         folder = self._config_manager.get_folder_by_id(folder_id)
@@ -567,6 +600,9 @@ class MainWindow(QMainWindow):
         self._title_bar.setStyleSheet(self._theme.title_bar_style)
         for child in self._title_bar.findChildren(QPushButton):
             child.setStyleSheet(btn_style)
+        self._title_bar._folder_label.setStyleSheet(
+            f"color: {p.text_dim}; font-size: 9px; padding: 0px; margin: 0px; background: transparent;"
+        )
 
         # Update folder tree
         if self._folder_tree is not None:

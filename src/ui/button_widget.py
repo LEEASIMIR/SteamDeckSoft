@@ -4,9 +4,9 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, QSize, QRect
-from PyQt6.QtGui import QFont, QIcon, QMouseEvent, QPainter, QPixmap, QColor
-from PyQt6.QtWidgets import QPushButton, QMenu, QStyleOptionButton, QStyle
+from PyQt6.QtCore import Qt, QSize, QRect, QMimeData, QPoint
+from PyQt6.QtGui import QFont, QIcon, QMouseEvent, QPainter, QPixmap, QColor, QDrag
+from PyQt6.QtWidgets import QPushButton, QMenu, QStyleOptionButton, QStyle, QApplication
 
 from ..config.models import ButtonConfig
 
@@ -38,13 +38,39 @@ class DeckButton(QPushButton):
         self._main_window = main_window
         self._monitor_text: str | None = None
         self._icon_pixmap: QPixmap | None = None
+        self._scaled_icon: QPixmap | None = None
+        self._scaled_icon_size: int = 0
+
+        self._drag_start_pos: QPoint | None = None
 
         self.setObjectName("deckButton")
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAcceptDrops(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
+        self._apply_style()
+        self._update_display()
+
+        if self._config and self._config.action.type:
+            self.clicked.connect(self._on_clicked)
+
+    def reconfigure(self, config: ButtonConfig | None, size: int) -> None:
+        """Update this button with a new config without recreating the widget."""
+        # Disconnect old clicked handler
+        try:
+            self.clicked.disconnect(self._on_clicked)
+        except TypeError:
+            pass
+
+        self._config = config
+        self._monitor_text = None
+        self._icon_pixmap = None
+        self._scaled_icon = None
+        self._scaled_icon_size = 0
+
+        self.setFixedSize(size, size)
         self._apply_style()
         self._update_display()
 
@@ -88,6 +114,27 @@ class DeckButton(QPushButton):
             self.setText(self._monitor_text)
             return
 
+        # Load icon pixmap for custom painting (drawn behind text)
+        # Priority: custom icon > default action icon
+        icon_path = ""
+        if self._config.icon and os.path.isfile(self._config.icon):
+            icon_path = self._config.icon
+        elif self._config.action.type:
+            from .default_icons import get_default_icon_path
+            icon_path = get_default_icon_path(self._config.action.type, self._config.action.params)
+
+        if icon_path:
+            self._icon_pixmap = QPixmap(icon_path)
+        else:
+            self._icon_pixmap = None
+        self._scaled_icon = None
+        self._scaled_icon_size = 0
+
+        # If icon exists and label is empty, show icon only (no text)
+        if self._icon_pixmap and not self._config.label:
+            self.setText("")
+            return
+
         display = self._action_registry.get_display_text(
             self._config.action.type, self._config.action.params
         )
@@ -95,12 +142,6 @@ class DeckButton(QPushButton):
             self.setText(display)
         else:
             self.setText(self._config.label)
-
-        # Load icon pixmap for custom painting (drawn behind text)
-        if self._config.icon and os.path.isfile(self._config.icon):
-            self._icon_pixmap = QPixmap(self._config.icon)
-        else:
-            self._icon_pixmap = None
 
     def paintEvent(self, event) -> None:
         if not (self._icon_pixmap and not self._icon_pixmap.isNull()):
@@ -117,17 +158,19 @@ class DeckButton(QPushButton):
         opt.icon = QIcon()
         self.style().drawControl(QStyle.ControlElement.CE_PushButton, opt, painter, self)
 
-        # 2) Draw icon
+        # 2) Draw icon (cached scaled pixmap)
         padding = 10
         available = min(self.width(), self.height()) - padding * 2
-        scaled = self._icon_pixmap.scaled(
-            available, available,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        x = (self.width() - scaled.width()) // 2
-        y = (self.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
+        if self._scaled_icon is None or self._scaled_icon_size != available:
+            self._scaled_icon = self._icon_pixmap.scaled(
+                available, available,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._scaled_icon_size = available
+        x = (self.width() - self._scaled_icon.width()) // 2
+        y = (self.height() - self._scaled_icon.height()) // 2
+        painter.drawPixmap(x, y, self._scaled_icon)
 
         # 3) Draw label text on top
         text = self.text()
@@ -151,6 +194,91 @@ class DeckButton(QPushButton):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, text)
 
         painter.end()
+
+    # --- Drag and Drop ---
+
+    _MIME_TYPE = "application/x-deckbutton-pos"
+
+    def mousePressEvent(self, event: QMouseEvent | None) -> None:
+        if event and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent | None) -> None:
+        if (
+            event is None
+            or self._drag_start_pos is None
+            or not (event.buttons() & Qt.MouseButton.LeftButton)
+        ):
+            return
+        if self._config is None or not self._config.action.type:
+            return
+        dist = (event.pos() - self._drag_start_pos).manhattanLength()
+        if dist < QApplication.startDragDistance():
+            return
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(self._MIME_TYPE, f"{self._row},{self._col}".encode())
+        drag.setMimeData(mime)
+
+        pixmap = self.grab()
+        painter = QPainter(pixmap)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+        painter.fillRect(pixmap.rect(), QColor(0, 0, 0, 160))
+        painter.end()
+        drag.setPixmap(pixmap)
+        drag.setHotSpot(event.pos())
+
+        self._drag_start_pos = None
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(self._MIME_TYPE):
+            event.acceptProposedAction()
+            self.setStyleSheet(
+                self.styleSheet()
+                + "\nQPushButton#deckButton { border: 2px solid #e94560; }"
+            )
+
+    def dragLeaveEvent(self, event) -> None:
+        self._apply_style()
+
+    def dropEvent(self, event) -> None:
+        self._apply_style()
+        data = event.mimeData().data(self._MIME_TYPE)
+        if data.isEmpty():
+            return
+        try:
+            src_row, src_col = (int(v) for v in bytes(data).decode().split(","))
+        except (ValueError, IndexError):
+            return
+
+        dst_row, dst_col = self._row, self._col
+        if (src_row, src_col) == (dst_row, dst_col):
+            return
+
+        folder = self._main_window._config_manager.get_folder_by_id(
+            self._main_window.get_current_folder_id()
+        )
+        if folder is None:
+            return
+
+        src_cfg = next((b for b in folder.buttons if b.position == (src_row, src_col)), None)
+        dst_cfg = next((b for b in folder.buttons if b.position == (dst_row, dst_col)), None)
+
+        if src_cfg is None:
+            return
+
+        if dst_cfg is not None:
+            src_cfg.position, dst_cfg.position = dst_cfg.position, src_cfg.position
+        else:
+            src_cfg.position = (dst_row, dst_col)
+
+        self._main_window._config_manager.save()
+        self._main_window._load_current_folder()
+
+        event.acceptProposedAction()
 
     _FOREGROUND_ACTIONS = frozenset({"launch_app", "open_url", "run_command"})
 

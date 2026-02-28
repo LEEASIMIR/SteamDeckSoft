@@ -14,7 +14,7 @@ from .models import AppConfig, FolderConfig
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "default_config.json"
-_USER_CONFIG_DIR = Path(os.environ.get("APPDATA", "~")) / "SteamDeckSoft"
+_USER_CONFIG_DIR = Path(os.environ.get("APPDATA", "~")) / "SoftDeck"
 _USER_CONFIG_PATH = _USER_CONFIG_DIR / "config.json"
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -58,9 +59,12 @@ class FolderEditorDialog(QDialog):
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Add")
         add_btn.clicked.connect(self._add_app)
+        find_btn = QPushButton("Find App...")
+        find_btn.clicked.connect(self._find_app)
         remove_btn = QPushButton("Remove")
         remove_btn.clicked.connect(self._remove_app)
         btn_row.addWidget(add_btn)
+        btn_row.addWidget(find_btn)
         btn_row.addWidget(remove_btn)
         btn_row.addStretch()
         mapping_layout.addLayout(btn_row)
@@ -87,6 +91,17 @@ class FolderEditorDialog(QDialog):
         )
         if ok and text.strip():
             self._app_list.addItem(text.strip())
+
+    def _find_app(self) -> None:
+        from .app_finder_dialog import AppFinderDialog
+
+        dlg = AppFinderDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            result = dlg.get_result()
+            if result:
+                exe_name = os.path.basename(result.exe_path)
+                if exe_name:
+                    self._app_list.addItem(exe_name)
 
     def _remove_app(self) -> None:
         current = self._app_list.currentRow()

@@ -34,7 +34,7 @@ kernel32.UnmapViewOfFile.restype = ctypes.wintypes.BOOL
 kernel32.CloseHandle.argtypes = [ctypes.wintypes.HANDLE]
 kernel32.CloseHandle.restype = ctypes.wintypes.BOOL
 
-SHM_NAME = "Local\\SteamDeckSoft_NumpadHook"
+SHM_NAME = "Local\\SoftDeck_NumpadHook"
 FILE_MAP_ALL_ACCESS = 0x000F001F
 MAX_EVENTS = 256
 

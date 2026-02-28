@@ -9,7 +9,6 @@
     "auto_switch_enabled": true,
     "always_on_top": true,
     "theme": "dark",
-    "global_hotkey": "ctrl+`",
     "window_opacity": 1.0,
     "folder_tree_visible": true
   },

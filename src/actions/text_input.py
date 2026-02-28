@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import keyboard
@@ -18,7 +19,11 @@ class TextInputAction(ActionBase):
             return
 
         use_clipboard = params.get("use_clipboard", False)
+        threading.Thread(
+            target=self._send, args=(text, use_clipboard), daemon=True,
+        ).start()
 
+    def _send(self, text: str, use_clipboard: bool) -> None:
         try:
             if use_clipboard:
                 self._paste_via_clipboard(text)

@@ -21,7 +21,7 @@ class TrayIcon(QSystemTrayIcon):
             QApplication.style().StandardPixmap.SP_ComputerIcon
         )
         self.setIcon(icon)
-        self.setToolTip("SteamDeckSoft")
+        self.setToolTip("SoftDeck")
 
         menu = QMenu()
 

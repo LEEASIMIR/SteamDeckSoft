@@ -1,1 +1,1 @@
-# SteamDeckSoft
+# SoftDeck

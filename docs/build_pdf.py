@@ -1,4 +1,4 @@
-"""Generate SteamDeckSoft_Guide.pdf from GUIDE.md content."""
+"""Generate SoftDeck_Guide.pdf from GUIDE.md content."""
 from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
@@ -135,7 +135,7 @@ def build_pdf(output_path: str):
 
     # ===== Title =====
     story.append(Spacer(1, 30))
-    story.append(Paragraph("SteamDeckSoft", s_title))
+    story.append(Paragraph("SoftDeck", s_title))
     story.append(Paragraph("시작 가이드", ParagraphStyle(
         "Sub", fontName="Malgun", fontSize=14, leading=18,
         textColor=ACCENT, alignment=TA_CENTER, spaceAfter=8,
@@ -367,5 +367,5 @@ def build_pdf(output_path: str):
 
 
 if __name__ == "__main__":
-    out = str(Path(__file__).parent / "SteamDeckSoft_Guide.pdf")
+    out = str(Path(__file__).parent / "SoftDeck_Guide.pdf")
     build_pdf(out)

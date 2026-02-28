@@ -1,8 +1,8 @@
-# SteamDeckSoft 사용법
+# SoftDeck 사용법
 
 ## 소개
 
-SteamDeckSoft는 Windows용 커스텀 버튼 덱 앱입니다. 넘패드 키로 조작하며, 앱 실행 / 핫키 전송 / 미디어 제어 / 시스템 모니터링 등을 버튼 하나로 수행할 수 있습니다.
+SoftDeck는 Windows용 커스텀 버튼 덱 앱입니다. 넘패드 키로 조작하며, 앱 실행 / 핫키 전송 / 미디어 제어 / 시스템 모니터링 등을 버튼 하나로 수행할 수 있습니다.
 
 ---
 
@@ -18,7 +18,7 @@ python main.py
 ```bash
 build.bat
 ```
-빌드 완료 시 `dist/SteamDeckSoft.exe` 생성
+빌드 완료 시 `dist/SoftDeck.exe` 생성
 
 ---
 
@@ -185,7 +185,7 @@ build.bat
 - **Export Config** — 현재 설정을 JSON 파일로 저장
 - **Import Config** — JSON 파일에서 설정 불러오기 (기존 설정 덮어쓰기)
 
-설정 파일 위치: `%APPDATA%/SteamDeckSoft/config.json`
+설정 파일 위치: `%APPDATA%/SoftDeck/config.json`
 
 ---
 

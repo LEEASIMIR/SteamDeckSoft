@@ -2,9 +2,9 @@ import sys
 
 
 def main() -> int:
-    from src.app import SteamDeckSoftApp
+    from src.app import SoftDeckApp
 
-    app = SteamDeckSoftApp(sys.argv)
+    app = SoftDeckApp(sys.argv)
 
     try:
         exit_code = app.exec()

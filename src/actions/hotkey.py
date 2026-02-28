@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 import keyboard
@@ -29,6 +30,9 @@ class HotkeyAction(ActionBase):
             logger.warning("hotkey: no keys specified")
             return
 
+        threading.Thread(target=self._send, args=(keys,), daemon=True).start()
+
+    def _send(self, keys: str) -> None:
         try:
             self._init_special()
             handler = self._SPECIAL_HOTKEYS.get(keys.lower().replace(" ", ""))

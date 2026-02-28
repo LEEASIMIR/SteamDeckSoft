@@ -224,12 +224,12 @@ class FolderTreeWidget(QTreeWidget):
             self._save_expanded_states()
             self.rebuild()
             self.select_folder_by_id(source_id)
+            # Set IgnoreAction so Qt's InternalMove doesn't delete the source
+            # row after we've already rebuilt the tree from config.
+            event.setDropAction(Qt.DropAction.IgnoreAction)
+            event.accept()
         else:
             event.ignore()
-            return
-
-        # Don't call super — we handle the move ourselves
-        event.accept()
 
     def _save_expanded_states(self) -> None:
         """Persist expanded states from tree items back to config."""

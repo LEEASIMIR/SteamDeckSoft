@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,13 +13,13 @@ class ActionConfig:
     params: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {"type": self.type, "params": dict(self.params)}
+        return {"type": self.type, "params": copy.deepcopy(self.params)}
 
     @classmethod
     def from_dict(cls, data: dict) -> ActionConfig:
         return cls(
             type=data.get("type", ""),
-            params=dict(data.get("params", {})),
+            params=copy.deepcopy(data.get("params", {})),
         )
 
 
@@ -116,7 +117,6 @@ class AppSettings:
     auto_switch_enabled: bool = True
     always_on_top: bool = True
     theme: str = "dark"
-    global_hotkey: str = "ctrl+`"
     window_opacity: float = 1.0
     folder_tree_visible: bool = True
     window_x: int | None = None
@@ -134,7 +134,6 @@ class AppSettings:
             "auto_switch_enabled": self.auto_switch_enabled,
             "always_on_top": self.always_on_top,
             "theme": self.theme,
-            "global_hotkey": self.global_hotkey,
             "window_opacity": self.window_opacity,
             "folder_tree_visible": self.folder_tree_visible,
             "window_x": self.window_x,
@@ -153,7 +152,6 @@ class AppSettings:
             auto_switch_enabled=data.get("auto_switch_enabled", True),
             always_on_top=data.get("always_on_top", True),
             theme=data.get("theme", "dark"),
-            global_hotkey=data.get("global_hotkey", "ctrl+`"),
             window_opacity=max(0.2, min(1.0, data.get("window_opacity", 0.9))),
             folder_tree_visible=data.get("folder_tree_visible", True),
             window_x=data.get("window_x"),

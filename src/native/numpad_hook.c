@@ -17,7 +17,7 @@
 
 /* ---- shared memory layout (must match Python) ------------------------- */
 
-#define SHM_NAME  L"Local\\SteamDeckSoft_NumpadHook"
+#define SHM_NAME  L"Local\\SoftDeck_NumpadHook"
 #define MAX_EVENTS 256
 
 #pragma pack(push, 1)

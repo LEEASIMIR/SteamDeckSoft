@@ -318,6 +318,9 @@ class ButtonEditorDialog(QDialog):
         browse_btn = QPushButton("Browse...")
         browse_btn.clicked.connect(self._browse_app)
         path_row.addWidget(browse_btn)
+        find_app_btn = QPushButton("Find App...")
+        find_app_btn.clicked.connect(self._find_app)
+        path_row.addWidget(find_app_btn)
         launch_form.addRow("Path:", path_row)
         self._app_args_edit = QLineEdit()
         launch_form.addRow("Arguments:", self._app_args_edit)
@@ -580,6 +583,18 @@ class ButtonEditorDialog(QDialog):
         )
         if path:
             self._app_path_edit.setText(path)
+
+    def _find_app(self) -> None:
+        from .app_finder_dialog import AppFinderDialog
+        dialog = AppFinderDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            result = dialog.get_result()
+            if result is not None:
+                self._app_path_edit.setText(result.exe_path)
+                if not self._app_workdir_edit.text().strip():
+                    self._app_workdir_edit.setText(result.working_dir)
+                if result.icon_path:
+                    self._icon_edit.setText(result.icon_path)
 
     def get_config(self) -> ButtonConfig:
         action_type = self._type_combo.currentData()

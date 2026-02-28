@@ -29,7 +29,7 @@ from .actions.run_command import RunCommandAction
 from .services.media_control import MediaControlService
 from .services.system_stats import SystemStatsService
 from .services.window_monitor import ActiveWindowMonitor
-from .services.global_hotkey import GlobalHotkeyService
+
 from .services.input_detector import InputDetector
 from .ui.main_window import MainWindow
 from .ui.tray_icon import TrayIcon
@@ -38,13 +38,13 @@ from .ui.splash import Splash
 
 logger = logging.getLogger(__name__)
 
-_MUTEX_NAME = "SteamDeckSoft_SingleInstance"
+_MUTEX_NAME = "SoftDeck_SingleInstance"
 
 
-class SteamDeckSoftApp(QApplication):
+class SoftDeckApp(QApplication):
     def __init__(self, argv: list[str]) -> None:
         super().__init__(argv)
-        self.setApplicationName("SteamDeckSoft")
+        self.setApplicationName("SoftDeck")
         self.setQuitOnLastWindowClosed(False)
 
         self._instance_mutex = None
@@ -88,13 +88,6 @@ class SteamDeckSoftApp(QApplication):
         # Services
         self._start_services()
 
-        # Global hotkey
-        self._global_hotkey = GlobalHotkeyService(
-            self._config_manager.settings.global_hotkey
-        )
-        self._global_hotkey.triggered.connect(self._main_window.toggle_visibility)
-        self._global_hotkey.start()
-
         # Apply theme
         self.setStyleSheet(self._theme.dark_theme)
 
@@ -113,7 +106,7 @@ class SteamDeckSoftApp(QApplication):
 
         # File log — always works, even in --windowed exe (no stdout)
         log_dir = os.path.join(
-            os.environ.get("APPDATA", "."), "SteamDeckSoft"
+            os.environ.get("APPDATA", "."), "SoftDeck"
         )
         os.makedirs(log_dir, exist_ok=True)
         file_handler = logging.FileHandler(
@@ -176,7 +169,37 @@ class SteamDeckSoftApp(QApplication):
         if is_on:
             self._main_window.hide()
         else:
+            # Re-check actual Num Lock state before showing
+            if self._input_detector.is_numlock_on():
+                return
             self._main_window.show_on_primary()
+            self._sync_folder_to_foreground()
+
+    def _sync_folder_to_foreground(self) -> None:
+        """Switch to the mapped folder for the current foreground app."""
+        if not self._config_manager.settings.auto_switch_enabled:
+            return
+        if self._window_monitor is None:
+            return
+        try:
+            import win32gui
+            import win32process
+
+            hwnd = win32gui.GetForegroundWindow()
+            if not hwnd:
+                return
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            if not pid or pid == os.getpid():
+                return
+            proc = psutil.Process(pid)
+            exe_name = proc.name()
+            folder = self._config_manager.find_folder_for_app(exe_name)
+            if folder is not None:
+                self._main_window.switch_to_folder_id(folder.id)
+            # Keep the monitor in sync to avoid duplicate signal
+            self._window_monitor._last_exe = exe_name
+        except Exception:
+            logger.debug("Failed to sync folder to foreground", exc_info=True)
 
     def _on_active_app_changed(self, exe_name: str) -> None:
         if not self._config_manager.settings.auto_switch_enabled:
@@ -189,7 +212,7 @@ class SteamDeckSoftApp(QApplication):
         """Tray notification + system sound to signal app is ready."""
         import winsound
         self._tray_icon.showMessage(
-            "SteamDeckSoft",
+            "SoftDeck",
             "Ready",
             QSystemTrayIcon.MessageIcon.Information,
             2000,
@@ -216,7 +239,7 @@ class SteamDeckSoftApp(QApplication):
                 if proc.pid == my_pid:
                     continue
                 name = proc.info["name"] or ""
-                if name.lower() == "steamdecksoft.exe":
+                if name.lower() == "softdeck.exe":
                     proc.terminate()
                     proc.wait(timeout=3)
                     logger.info("Terminated existing PID %d", proc.pid)
@@ -252,8 +275,6 @@ class SteamDeckSoftApp(QApplication):
         logger.info("Shutting down...")
         if hasattr(self, "_tray_icon"):
             self._tray_icon.hide()
-        if hasattr(self, "_global_hotkey"):
-            self._global_hotkey.stop()
         if hasattr(self, "_input_detector"):
             self._input_detector.stop()
         if hasattr(self, "_stats_service"):

@@ -128,7 +128,7 @@ class Splash(QSplashScreen):
         p.setFont(font_title)
         p.setPen(QColor(accent))
         title_rect = self.rect().adjusted(0, 28, 0, -60)
-        p.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "SteamDeckSoft")
+        p.drawText(title_rect, Qt.AlignmentFlag.AlignCenter, "SoftDeck")
 
         # --- Version ---
         font_ver = QFont("Segoe UI", 9)
