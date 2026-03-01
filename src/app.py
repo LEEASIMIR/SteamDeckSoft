@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import os
+from pathlib import Path
 import sys
 import time
 
@@ -13,8 +14,9 @@ import psutil
 import keyboard as _kb
 _kb._listener.start_if_necessary = lambda: None
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation, Qt, QTimer
+from PyQt6.QtGui import QColor, QLinearGradient, QPainter, QPixmap
+from PyQt6.QtWidgets import QApplication, QSplashScreen
 
 from .config.manager import ConfigManager
 from .actions.registry import ActionRegistry
@@ -37,6 +39,8 @@ from .ui.styles import get_theme
 from .ui.toast import ToastManager
 from .plugins.loader import PluginLoader
 
+_ASSETS_DIR = Path(__file__).resolve().parent.parent / "assets"
+
 logger = logging.getLogger(__name__)
 
 _MUTEX_NAME = "SoftDeck_SingleInstance"
@@ -53,6 +57,12 @@ class SoftDeckApp(QApplication):
 
         # Single instance: kill existing process if running
         self._ensure_single_instance()
+
+        # Splash screen
+        self._splash = self._create_splash()
+        self._splash.show()
+        self._splash_shown_at = time.monotonic()
+        self.processEvents()
 
         # Config
         self._config_manager = ConfigManager()
@@ -95,15 +105,16 @@ class SoftDeckApp(QApplication):
         # Apply theme
         self.setStyleSheet(self._theme.dark_theme)
 
-        # Show window: widget mode → always show; shortcut mode → only if Num Lock OFF
-        if self._config_manager.settings.input_mode == "widget":
-            self._main_window.show()
-        elif self._input_detector.is_numlock_on():
+        # Determine if main window should show at startup
+        self._should_show_window = (
+            self._config_manager.settings.input_mode == "widget"
+            or not self._input_detector.is_numlock_on()
+        )
+        if not self._should_show_window:
             logger.info("Num Lock is ON at startup — window hidden")
-        else:
-            self._main_window.show()
 
-        # Ready feedback
+        # Ready feedback (deferred — splash transition then show window)
+        self._transition_group = None
         self._notify_ready()
 
     def _setup_logging(self) -> None:
@@ -303,10 +314,163 @@ class SoftDeckApp(QApplication):
             self._main_window.update_device_name(name)
 
     def _notify_ready(self) -> None:
-        """Toast notification + system sound to signal app is ready."""
+        """Wait for minimum splash time, then start transition animation."""
+        remaining_ms = 0
+        if self._splash is not None:
+            _SPLASH_MIN_SECONDS = 3.0
+            elapsed = time.monotonic() - self._splash_shown_at
+            remaining_ms = max(0, int((_SPLASH_MIN_SECONDS - elapsed) * 1000))
+        QTimer.singleShot(remaining_ms, self._begin_transition)
+
+    def _begin_transition(self) -> None:
+        """Splash slides to main window position + cross-fade into the app."""
+        # No splash or window shouldn't show → skip animation
+        if self._splash is None or not self._should_show_window:
+            if self._splash is not None:
+                self._splash.close()
+                self._splash = None
+            if self._should_show_window:
+                self._main_window.show_on_primary()
+            self._on_ready()
+            return
+
+        # Compute main window target position
+        settings = self._config_manager.settings
+        target_opacity = settings.window_opacity
+        if settings.window_x is not None and settings.window_y is not None:
+            target_pos = QPoint(settings.window_x, settings.window_y)
+        else:
+            from PyQt6.QtGui import QGuiApplication
+            screen = QGuiApplication.primaryScreen()
+            geo = screen.availableGeometry()
+            margin = 12
+            target_pos = QPoint(
+                geo.x() + geo.width() - self._main_window.width() - margin,
+                geo.y() + geo.height() - self._main_window.height() - margin,
+            )
+
+        # Show main window transparent at target position
+        self._main_window.setWindowOpacity(0.0)
+        self._main_window.move(target_pos)
+        self._main_window.show()
+
+        # Splash destination: centered over the main window
+        win_center_x = target_pos.x() + self._main_window.width() // 2
+        win_center_y = target_pos.y() + self._main_window.height() // 2
+        splash_end = QPoint(
+            win_center_x - self._splash.width() // 2,
+            win_center_y - self._splash.height() // 2,
+        )
+
+        duration = 800
+
+        # Splash — slide to main window center
+        splash_move = QPropertyAnimation(self._splash, b"pos")
+        splash_move.setDuration(duration)
+        splash_move.setStartValue(self._splash.pos())
+        splash_move.setEndValue(splash_end)
+        splash_move.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        # Splash — fade out
+        splash_fade = QPropertyAnimation(self._splash, b"windowOpacity")
+        splash_fade.setDuration(duration)
+        splash_fade.setStartValue(1.0)
+        splash_fade.setEndValue(0.0)
+        splash_fade.setEasingCurve(QEasingCurve.Type.InCubic)
+
+        # Main window — fade in
+        win_fade = QPropertyAnimation(self._main_window, b"windowOpacity")
+        win_fade.setDuration(duration)
+        win_fade.setStartValue(0.0)
+        win_fade.setEndValue(target_opacity)
+        win_fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        # Run all in parallel
+        self._transition_group = QParallelAnimationGroup()
+        self._transition_group.addAnimation(splash_move)
+        self._transition_group.addAnimation(splash_fade)
+        self._transition_group.addAnimation(win_fade)
+        self._transition_group.finished.connect(self._on_transition_finished)
+        self._transition_group.start()
+
+    def _on_transition_finished(self) -> None:
+        if self._splash is not None:
+            self._splash.close()
+            self._splash = None
+        self._transition_group = None
+        self._on_ready()
+
+    def _on_ready(self) -> None:
         import winsound
         self._toast_manager.show("SoftDeck", "Ready", duration_ms=2000)
         winsound.PlaySound("SystemAsterisk", winsound.SND_ALIAS | winsound.SND_ASYNC)
+
+    # ------------------------------------------------------------------
+    # Splash screen
+    # ------------------------------------------------------------------
+
+    def _create_splash(self) -> QSplashScreen:
+        from .version import APP_VERSION
+
+        size = 280
+        icon_size = 128
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Background gradient
+        grad = QLinearGradient(0, 0, 0, size)
+        grad.setColorAt(0.0, QColor("#1a1a2e"))
+        grad.setColorAt(1.0, QColor("#16213e"))
+        painter.setBrush(grad)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(0, 0, size, size, 20, 20)
+
+        # Icon
+        icon_path = _ASSETS_DIR / "트레이아이콘후보1.png"
+        if icon_path.exists():
+            icon_pm = QPixmap(str(icon_path)).scaled(
+                icon_size, icon_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = (size - icon_pm.width()) // 2
+            y = 40
+            painter.drawPixmap(x, y, icon_pm)
+
+        # Title
+        font = painter.font()
+        font.setPixelSize(22)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#e0e0e0"))
+        painter.drawText(0, 185, size, 30, Qt.AlignmentFlag.AlignCenter, "SoftDeck")
+
+        # Version
+        font.setPixelSize(12)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor("#888888"))
+        painter.drawText(0, 210, size, 20, Qt.AlignmentFlag.AlignCenter, f"v{APP_VERSION}")
+
+        # Loading
+        font.setPixelSize(11)
+        painter.setFont(font)
+        painter.setPen(QColor("#666666"))
+        painter.drawText(0, 245, size, 20, Qt.AlignmentFlag.AlignCenter, "Loading...")
+
+        painter.end()
+
+        splash = QSplashScreen(pixmap)
+        splash.setWindowFlags(
+            Qt.WindowType.SplashScreen
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint,
+        )
+        splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        return splash
 
     # ------------------------------------------------------------------
     # Single-instance helpers

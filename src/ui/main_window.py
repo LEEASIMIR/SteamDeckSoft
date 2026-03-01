@@ -236,17 +236,19 @@ class MainWindow(QMainWindow):
 
     def _setup_window(self) -> None:
         self.setWindowTitle("SoftDeck")
-        self.setWindowFlags(
+        settings = self._config_manager.settings
+        flags = (
             Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.WindowDoesNotAcceptFocus
         )
+        if settings.always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setMouseTracking(True)
         self.setStyleSheet(self._theme.dark_theme)
 
-        settings = self._config_manager.settings
         self._apply_size(settings)
         self.setWindowOpacity(settings.window_opacity)
 
@@ -502,24 +504,26 @@ class MainWindow(QMainWindow):
         if settings.window_x is not None and settings.window_y is not None:
             self.move(settings.window_x, settings.window_y)
         else:
-            self._center_on_primary()
+            self._default_position()
         self.show()
         self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
 
-    def _center_on_primary(self) -> None:
+    def _default_position(self) -> None:
+        """Place window at bottom-right of primary screen (above taskbar)."""
         from PyQt6.QtGui import QGuiApplication
         screen = QGuiApplication.primaryScreen()
         geo = screen.availableGeometry()
-        x = geo.x() + (geo.width() - self.width()) // 2
-        y = geo.y()
+        margin = 12
+        x = geo.x() + geo.width() - self.width() - margin
+        y = geo.y() + geo.height() - self.height() - margin
         self.move(x, y)
 
     def reset_position(self) -> None:
-        """Reset window position to center-top of primary screen."""
+        """Reset window position to bottom-right of primary screen."""
         self._config_manager.settings.window_x = None
         self._config_manager.settings.window_y = None
         self._config_manager.save()
-        self._center_on_primary()
+        self._default_position()
 
     def moveEvent(self, event) -> None:
         super().moveEvent(event)
@@ -784,9 +788,11 @@ class MainWindow(QMainWindow):
         self._load_current_folder()
 
     def reload_config(self) -> None:
-        new_theme_name = self._config_manager.settings.theme
+        settings = self._config_manager.settings
+        new_theme_name = settings.theme
         if new_theme_name != self._theme.palette.name:
             self.apply_theme(new_theme_name)
+        self._apply_always_on_top(settings.always_on_top)
         self._resize_for_settings()
         if self._folder_tree:
             self._folder_tree.rebuild()
@@ -796,6 +802,15 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if hasattr(app, 'apply_input_mode'):
             app.apply_input_mode()
+
+    def _apply_always_on_top(self, on_top: bool) -> None:
+        has_flag = bool(self.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
+        if has_flag == on_top:
+            return
+        was_visible = self.isVisible()
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, on_top)
+        if was_visible:
+            self.show()
 
     def apply_theme(self, theme_name: str) -> None:
         """Switch to a new theme, updating all stylesheets."""

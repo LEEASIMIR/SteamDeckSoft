@@ -4,8 +4,8 @@
   "settings": {
     "grid_rows": 4,
     "grid_cols": 3,
-    "button_size": 100,
-    "button_spacing": 8,
+    "button_size": 60,
+    "button_spacing": 4,
     "auto_switch_enabled": true,
     "always_on_top": true,
     "theme": "dark",

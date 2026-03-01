@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtGui import QIcon, QAction
@@ -17,10 +18,8 @@ class TrayIcon(QSystemTrayIcon):
         super().__init__(parent=main_window)
         self._main_window = main_window
 
-        icon = QApplication.style().standardIcon(
-            QApplication.style().StandardPixmap.SP_ComputerIcon
-        )
-        self.setIcon(icon)
+        icon_path = str(Path(__file__).resolve().parent.parent.parent / "assets" / "트레이아이콘후보2.png")
+        self.setIcon(QIcon(icon_path))
         self.setToolTip("SoftDeck")
 
         menu = QMenu()
